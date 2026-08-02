@@ -130,4 +130,3 @@ This is a rebase of work other people did first.
 
 The code here is [MIT](LICENSE). The images it publishes are an aggregate of GPL-2.0, MPL-2.0 and other
 works, each keeping its own license; see [NOTICE](NOTICE) for the breakdown and the source pointer.
-# talos-raspberry-pi5

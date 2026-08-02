@@ -93,22 +93,29 @@ RECIPE_HASH=$(cd "$REPO_ROOT" && for f in $RECIPE_FILES; do
 done | sha256hex)
 FINGERPRINT=$(printf '%s' "${BUILD_KEY}|${MACHINERY_VERSION}|${RECIPE_HASH}" | sha256hex)
 
+# kernel_key covers ONLY what goes into the kernel image, so the cross-run kernel cache survives an edit to
+# this script or to the overlay/extension pins. Deliberately narrower than the fingerprint.
+KERNEL_KEY=$(printf '%s' "${PKGS_REF}|${KERNEL_COMMIT}|$(sha256hex "${REPO_ROOT}/kernel/pi5-rpi.fragment")|$(sha256hex "${REPO_ROOT}/kernel/patch-skip.txt")" | sha256hex | cut -c1-16)
+
 mkdir -p "$CACHE_DIR"
 jq -n \
   --arg talos "$TALOS_VERSION" --arg pkgs_ref "$PKGS_REF" --arg pkgs_describe "$PKGS_DESC" \
   --arg kernel_version "$KERNEL_VERSION" --arg kernel_commit "$KERNEL_COMMIT" --arg kernel_source "$KERNEL_SOURCE" \
   --arg overlay "$SBCOVERLAY_VERSION" --arg iscsi_ext "$ISCSI_EXT" --arg util_ext "$UTIL_EXT" \
   --arg build_key "$BUILD_KEY" --arg recipe_hash "$RECIPE_HASH" --arg fingerprint "$FINGERPRINT" \
+  --arg kernel_key "$KERNEL_KEY" \
   '{talos: $talos,
     pkgs_ref: $pkgs_ref, pkgs_describe: $pkgs_describe,
     kernel_version: $kernel_version, kernel_commit: $kernel_commit, kernel_source: $kernel_source,
     kernel_url: ("https://github.com/raspberrypi/linux/tree/" + $kernel_commit),
     overlay: $overlay, overlay_url: ("https://github.com/talos-rpi5/sbc-raspberrypi5/tree/" + $overlay),
     iscsi_ext: $iscsi_ext, util_ext: $util_ext,
-    build_key: $build_key, recipe_hash: $recipe_hash, fingerprint: $fingerprint}' \
+    build_key: $build_key, recipe_hash: $recipe_hash, fingerprint: $fingerprint,
+    kernel_key: $kernel_key}' \
   > "$INPUTS_FILE"
 
 say "resolved"
 echo "   build key   ${BUILD_KEY}"
 echo "   fingerprint ${FINGERPRINT}"
+echo "   kernel key  ${KERNEL_KEY}"
 echo "   written     ${INPUTS_FILE}"
