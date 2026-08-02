@@ -1,0 +1,43 @@
+# Raspberry Pi 5 (BCM2712 + RP1) layered over siderolabs/pkgs' stock Talos arm64 config, then reconciled
+# with `make olddefconfig` against the raspberrypi/linux source. Symbol names come from that tree's
+# arch/arm64/configs/bcm2712_defconfig.
+#
+# Only the RP1 block below and the NVMe line actually differ from the stock Talos config. Everything else is
+# an assertion: stock already sets it, and we re-state it so an upstream config change cannot drop it
+# silently. Every `=y` line here is re-checked after olddefconfig, so an unmet dependency fails the build
+# early rather than shipping a kernel that quietly lost a driver. See docs/kernel.md.
+
+# Stock Talos arm64 is already 4K. Asserted because the kernel SOURCE is a Pi tree, whose own
+# bcm2712_defconfig is 16K, and some storage software does not cope with 16K.
+CONFIG_ARM64_4K_PAGES=y
+# CONFIG_ARM64_16K_PAGES is not set
+
+# The reason this build exists. RP1 is the south bridge the wired NIC, USB and GPIO hang off, and stock Talos
+# sets none of these five: they exist only in the raspberrypi/linux fork.
+CONFIG_MFD_RP1=y
+CONFIG_MBOX_RP1=y
+CONFIG_FIRMWARE_RP1=y
+CONFIG_COMMON_CLK_RP1_SDIO=y
+CONFIG_BCM2712_IOMMU=y
+
+# Rest of the RP1 and BCM2712 bring-up, already set by stock Talos. Asserted alongside the five above so a
+# partial regression is as loud as a total one.
+CONFIG_PINCTRL_RP1=y
+CONFIG_COMMON_CLK_RP1=y
+CONFIG_PINCTRL_BCM2712=y
+CONFIG_BCM2712_MIP=y
+
+# NVMe as a built-in rather than stock's module, so the root device needs nothing from the initramfs. This is
+# why nvme.ko disappears from the module tree and the module list has to be filtered.
+CONFIG_BLK_DEV_NVME=y
+
+# Already set by stock Talos. PCIE_BRCMSTB drives the SoC PCIe the NVMe slot sits on, MACB is the Pi 5 NIC,
+# and Talos's WatchdogTimerConfig binds to /dev/watchdog0 from BCM2835_WDT.
+CONFIG_PCIE_BRCMSTB=y
+CONFIG_MACB=y
+CONFIG_WATCHDOG=y
+CONFIG_BCM2835_WDT=y
+
+# Also already set. Lets a privileged pod force-close established sockets with `ss -K`, which is how a wedged
+# macb NIC is recovered without rebooting.
+CONFIG_INET_DIAG_DESTROY=y

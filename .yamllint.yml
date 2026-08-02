@@ -1,0 +1,12 @@
+# yamllint config for CI (.github/workflows/ci.yaml, job `yaml`). Relaxed on purpose: the only YAML here is
+# workflow files, so the stylistic rules are off and only real syntax/structure errors fail the job.
+extends: relaxed
+rules:
+  line-length: disable          # long action digest pins and URLs are fine
+  truthy: disable               # GitHub Actions `on:` is a truthy keyword, and that is not an error
+  empty-lines: disable          # section/trailing blank lines are stylistic, not errors
+  comments:
+    min-spaces-from-content: 1  # the default wants two spaces before a trailing `#`; this repo writes one
+
+ignore: |
+  .cache/

@@ -1,0 +1,45 @@
+# Self-hosted Renovate. Reads /renovate.json5 from the cloned repo automatically.
+name: Renovate
+
+on:
+  schedule:
+    # Automerge needs frequent runs: Renovate opens the PR on one run and merges it on the NEXT one, once CI
+    # has passed. A merged bump lands on main, which is what triggers the image build.
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: Renovate log level
+        default: info
+        type: choice
+        options: [info, debug]
+      dryRun:
+        description: Dry run (extract + plan, open no PRs)
+        default: false
+        type: boolean
+  push:
+    branches: [main]
+    paths: # fast feedback while iterating on the config itself
+      - renovate.json5
+      - .github/workflows/renovate.yaml
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+permissions:
+  contents: read # Renovate acts through RENOVATE_TOKEN, not GITHUB_TOKEN
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: renovatebot/github-action@973d3e5a68e735a444e8c03432b66eedb343c302 # v46.2.0
+        with:
+          # A dedicated PAT: GITHUB_TOKEN cannot open PRs that re-trigger workflows, and lacks the scope.
+          token: ${{ secrets.RENOVATE_TOKEN }}
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }} # this repo only, no org-wide autodiscover
+          LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
+          RENOVATE_DRY_RUN: ${{ inputs.dryRun && 'full' || '' }}

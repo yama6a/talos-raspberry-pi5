@@ -1,0 +1,54 @@
+NOTICE
+======
+
+LICENSE covers this repository's own contents: the build scripts, the Makefiles, the kernel config fragment,
+the workflows and the docs. Nothing upstream is vendored here; every dependency is fetched at build time.
+
+This file covers the ARTIFACTS the repository publishes, namely the installer image
+(ghcr.io/yama6a/talos-raspberry-pi5) and the raw disk image (metal-arm64-rpi5.raw.xz). Those are an aggregate
+of separately licensed works, and each keeps its own license.
+
+
+Components of the published artifacts
+-------------------------------------
+
+  Linux kernel                 GPL-2.0-only
+    Source:  https://github.com/raspberrypi/linux at the commit named in the release's build-inputs.json
+    Patches: https://github.com/siderolabs/pkgs at the commit named there, kernel/build/patches/
+             minus the entries in kernel/patch-skip.txt of this repository
+    Config:  siderolabs/pkgs kernel/build/config-arm64, plus kernel/pi5-rpi.fragment of this repository,
+             reconciled by `make olddefconfig`. Both halves ship as release assets
+             (kernel-config-arm64.base and kernel-config-arm64.fragment).
+
+  U-Boot                       GPL-2.0-or-later
+    Source:  https://github.com/talos-rpi5/u-boot at the tag pinned by talos-rpi5/sbc-raspberrypi5
+
+  Device trees and overlays    GPL-2.0 OR MIT
+    Source:  https://github.com/raspberrypi/linux (bcm2712*.dtb) and
+             https://github.com/raspberrypi/firmware (boot/overlays/*.dtbo)
+
+  Talos Linux                  MPL-2.0   https://github.com/siderolabs/talos
+  Talos pkgs                   MPL-2.0   https://github.com/siderolabs/pkgs
+  Raspberry Pi 5 overlay       MPL-2.0   https://github.com/talos-rpi5/sbc-raspberrypi5
+  iscsi-tools extension        MPL-2.0   https://github.com/siderolabs/extensions
+  util-linux-tools extension   MPL-2.0   https://github.com/siderolabs/extensions
+
+The image's EFI partition additionally carries COPYING.linux (the GPL-2.0 text) and LICENCE.broadcom, both
+placed there by the overlay. No proprietary Broadcom firmware is shipped: the Pi 5's second-stage bootloader
+lives in on-board SPI EEPROM, so an image for it needs no start*.elf or fixup*.dat.
+
+
+Source for the GPL-licensed parts
+---------------------------------
+
+Offered under GPL-2.0 section 3(a): the complete corresponding source is public and pinned exactly.
+
+Every release carries a build-inputs.json asset naming the precise upstream commit of each source, and an
+SPDX SBOM declaring the kernel GPL-2.0-only. Together with this repository at the release's git tag, that is
+everything needed to reproduce the binaries:
+
+    git clone --branch <release-tag> https://github.com/yama6a/talos-raspberry-pi5
+    cd talos-raspberry-pi5 && make build
+
+Reproducing requires network access to the upstream repositories above. The archives are not mirrored here.
+If an upstream ref named in a build-inputs.json ever becomes unreachable, open an issue on this repository.
