@@ -22,7 +22,7 @@ SRCSERVER_PORT="8099"
 # renovate: datasource=docker
 SRCSERVER_IMAGE="nginx:alpine"             # serves the kernel tarball to the build
 
-require docker git curl jq go python3 perl
+require docker git curl jq go python3 perl crane
 load_inputs
 
 TALOS_MK="${REPO_ROOT}/build/Makefile.talos"

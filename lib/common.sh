@@ -55,6 +55,7 @@ require() {
       zstd)   die "zstd not found on PATH (brew install zstd / apt install zstd)" ;;
       xz)     die "xz not found on PATH (brew install xz / apt install xz-utils)" ;;
       gh)     die "gh not found on PATH (https://cli.github.com/); only publish needs it" ;;
+      crane)  die "crane not found on PATH (brew install crane, or the go-containerregistry release binary). Talos's own installer target shells out to it" ;;
       *)      die "$t not found on PATH" ;;
     esac
   done
