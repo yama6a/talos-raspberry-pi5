@@ -21,6 +21,8 @@
 7. build the overlay
 8. mirror Talos's Dockerfile frontend into the local registry, then build the installer and the raw image
 
+Step 4 is skipped entirely when a cached kernel matches, see [the kernel cache](#the-kernel-cache).
+
 The registry is local (`localhost:5010`) because it is fast, works offline, and supports the BuildKit merge
 operation that siderolabs' `bldr` needs. The builder inside dockerd refuses that operation, which is why the
 build creates its own `docker-container` builder.
@@ -49,6 +51,30 @@ The `fingerprint` in `build-inputs.json` is the stricter one: it covers the reci
 compares to decide whether a push needs a rebuild at all.
 
 `make clean` removes the current key's directory, `make distclean` removes `.cache` entirely.
+
+### The kernel cache
+
+A cold kernel compile is over an hour, and CI runners are ephemeral, so the build reuses a kernel image built
+from identical inputs instead of recompiling it. After a successful compile it pushes the image to
+`ghcr.io/<owner>/<repo>:kernel-<kernel_key>`; on a later run it pulls that tag and skips `make kernel`.
+
+`kernel_key` covers exactly what goes into the kernel and nothing else: the pkgs commit, the
+`raspberrypi/linux` commit, `kernel/pi5-rpi.fragment` and `kernel/patch-skip.txt`. So editing this script,
+bumping the overlay or changing an extension pin all keep the cache, while anything that would actually change
+the kernel invalidates it.
+
+Best-effort in both directions. No token means no push and a silent skip, so a local build never asks for
+credentials. A pull miss or a push failure only costs the compile time. Set `KERNEL_CACHE=false` to force a
+recompile.
+
+The safety net if the key were ever wrong: REBASE 2 derives the kernel version from the image's own module
+tree, and validation asserts the UKI's `.uname` equals it.
+
+### BuildKit's cache
+
+`PRUNE_BUILD_CACHE=true` no longer prunes unconditionally, only when free space is under `PRUNE_BELOW_MB`
+(40 GB). The GitHub runner pool is heterogeneous and usually leaves ~114 GB free at that point, so pruning
+was throwing away the cache that makes a retry cheap for no reason.
 
 ## The three rebases
 
@@ -146,6 +172,9 @@ None of this proves the Pi 5 boot chain works. Only booting a board does.
 - `digest mismatch` on the kernel source: GitHub `/archive/` tarballs are not byte-stable. The local source
   server exists for exactly this. Nothing to do.
 - `pkgs checkout describes as X, but Talos names Y`: an upstream tag moved. Re-run `make resolve`.
+- `grep: write error: Broken pipe` and the build dies: a producer was SIGPIPEd by an early-exiting consumer
+  (`| head -1`, `| grep -q`) and `pipefail` turned that into a build failure. Read the file directly with an
+  awk that exits, rather than piping. This killed a 75-minute run once, right after the kernel finished.
 - `cannot pull docker/dockerfile-upstream from Docker Hub`: the daemon could not fetch Talos's Dockerfile
   frontend. Usually stale stored Hub credentials, which the CLI hands over and then hangs on instead of
   falling back to anonymous. `docker login` fixes it, and so does `docker logout`, because every image this

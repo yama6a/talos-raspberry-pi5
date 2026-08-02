@@ -74,7 +74,9 @@ gnu_make() {
   local m
   for m in gmake make; do
     command -v "$m" >/dev/null || continue
-    "$m" --version 2>/dev/null | head -1 | grep -qE 'GNU Make ([4-9]|[0-9]{2})' || continue
+    # Captured, not piped into head/grep -q: an early-exiting consumer can SIGPIPE the producer, and every
+    # caller of this runs under pipefail.
+    case "$("$m" --version 2>/dev/null)" in "GNU Make "[4-9]*|"GNU Make "[1-9][0-9]*) ;; *) continue ;; esac
     command -v "$m"; return 0
   done
   die "GNU make >= 4 not found (macOS: brew install make, which installs it as gmake; Debian/Ubuntu: apt install make)"
@@ -92,6 +94,7 @@ load_inputs() {
   KERNEL_SOURCE=$(jq -r '.kernel_source' "$j")  # which firmware ref we found the commit through
   BUILD_KEY=$(jq -r '.build_key' "$j")
   FINGERPRINT=$(jq -r '.fingerprint' "$j")
+  KERNEL_KEY=$(jq -r '.kernel_key' "$j")   # narrower than the fingerprint: keys the cross-run kernel cache
   [ "$(jq -r '.talos' "$j")" = "$TALOS_VERSION" ] \
     || die "${INPUTS_FILE} was resolved for $(jq -r '.talos' "$j"), but versions.env now says ${TALOS_VERSION}. Re-run: make resolve"
   BUILD_DIR="${CACHE_DIR}/${BUILD_KEY}"   # build scratch: upstream checkouts, kernel tarball, staged image

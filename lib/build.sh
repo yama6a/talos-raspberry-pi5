@@ -41,7 +41,9 @@ echo "   build dir  ${BUILD_DIR}"
 # `bldr` (siderolabs' build tool) needs BuildKit's merge operation, which stacks image layers without
 # re-copying them. The builder built into dockerd refuses it; a standalone docker-container builder supports it.
 say "local registry on ${REGISTRY_HOST}"
-docker ps --format '{{.Names}}' | grep -qx "$REGISTRY_NAME" || \
+# Filter in the daemon rather than `docker ps | grep -q`, which can SIGPIPE docker ps and, under pipefail,
+# read as "absent" and then fail on a name collision.
+[ -n "$(docker ps -q -f "name=^${REGISTRY_NAME}$")" ] || \
   docker run -d --restart=unless-stopped -p "127.0.0.1:${REGISTRY_PORT}:5000" --name "$REGISTRY_NAME" "$REGISTRY_IMAGE" >/dev/null
 
 say "buildx builder ${BUILDER_NAME} (supports BuildKit merge)"
@@ -171,27 +173,59 @@ assert anchor in s, "kernel/build/pkg.yaml anchor not found (upstream changed?)"
 open(p,"w").write(s.replace(anchor, block, 1))
 PY
 
-say "build kernel (clang/ThinLTO, the long pole; verifies bake-ins early then compiles)"
-"$GMAKE" -f "$TALOS_MK" CHECKOUTS="$CHK" REGISTRY="$REGISTRY_HOST" REGISTRY_USERNAME="$REGISTRY_USER" kernel
+# What `make kernel` will tag the image with, and what REBASE 2 reads back. The pkgs checkout is already dirty
+# from REBASE 1, and `--dirty` is a flag not a content hash, so this is the same string the build computes.
+PKGS_TAG=$(cd "$CHK/pkgs" && git describe --tag --always --dirty --match 'v[0-9]*')
+KIMG="${REGISTRY_HOST}/${REGISTRY_USER}/kernel:${PKGS_TAG}"
+KERNEL_CACHE_REF="${IMAGE_REPO}:kernel-${KERNEL_KEY}"
+
+# A cold compile is over an hour and CI runners are ephemeral, so reuse a kernel built from identical inputs.
+# KERNEL_KEY covers the pkgs commit, the linux commit, the config fragment and the patch-skip list, and
+# nothing else, so editing this script or bumping the overlay does not throw the kernel away.
+# Best-effort both ways: a miss or a failed push only ever costs time.
+if [ "${KERNEL_CACHE:-true}" = "true" ] && docker pull -q "$KERNEL_CACHE_REF" >/dev/null 2>&1; then
+  say "reusing the cached kernel ${KERNEL_CACHE_REF}, skipping the compile"
+  docker tag "$KERNEL_CACHE_REF" "$KIMG"
+  docker push -q "$KIMG" >/dev/null || die "cannot push the cached kernel into the local registry"
+else
+  say "build kernel (clang/ThinLTO, the long pole; verifies bake-ins early then compiles)"
+  "$GMAKE" -f "$TALOS_MK" CHECKOUTS="$CHK" REGISTRY="$REGISTRY_HOST" REGISTRY_USERNAME="$REGISTRY_USER" kernel
+  # Fill the cache for next time. Silently skipped without a token, so a local build never asks for one.
+  _kt="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
+  if [ -n "$_kt" ]; then
+    if printf '%s' "$_kt" | docker login "$GHCR_SERVER" -u "${GHCR_USER:-${GITHUB_REPOSITORY%%/*}}" --password-stdin >/dev/null 2>&1; then
+      docker pull -q "$KIMG" >/dev/null 2>&1 && docker tag "$KIMG" "$KERNEL_CACHE_REF" \
+        && docker push -q "$KERNEL_CACHE_REF" >/dev/null 2>&1 \
+        && echo "   cached as ${KERNEL_CACHE_REF}" \
+        || warn "could not cache the kernel image; the next run will recompile"
+    else
+      warn "GHCR login failed, kernel not cached; the next run will recompile"
+    fi
+  fi
+fi
 
 # ---- REBASE 2: module list -------------------------------------------------
 # The stock list names drivers our config does not build (bnxt_re and friends), and nvme is built in rather
 # than a module, so the initramfs step fails on the first missing .ko. Intersect it with the real module tree.
-# The kernel image is in the local registry now, so BuildKit's cache is disposable, and it is where the tens
-# of GB sit. CI sets this because a GitHub runner can be as small as ~37 GB free; locally leave it off so a
-# re-run does not recompile.
-if [ "${PRUNE_BUILD_CACHE:-false}" = "true" ]; then
-  say "pruning the BuildKit cache (PRUNE_BUILD_CACHE)"
+# The kernel image is in the local registry now, so BuildKit's cache is disposable and it is where the tens of
+# GB sit. But throwing it away costs a full recompile on any retry, so only do it when space is actually short.
+# The GitHub runner pool is heterogeneous: usually ~114 GB free at this point, occasionally ~20 GB.
+FREE_MB=$(df -Pm "$BUILD_DIR" | awk 'NR==2 {print $4}')
+if [ "${PRUNE_BUILD_CACHE:-false}" = "true" ] && [ "${FREE_MB:-0}" -lt "${PRUNE_BELOW_MB:-40000}" ]; then
+  say "only ${FREE_MB} MB free, pruning the BuildKit cache"
   docker buildx prune -af >/dev/null 2>&1 || true
-  df -h "$BUILD_DIR" | tail -1
+  df -Pm "$BUILD_DIR" | awk 'NR==2 {print "   now " $4 " MB free"}'
+else
+  echo "   ${FREE_MB} MB free, keeping the BuildKit cache for a cheap retry"
 fi
 
 say "REBASE 2, filter modules-arm64.txt to modules the kernel actually built"
-PKGS_TAG=$(cd "$CHK/pkgs" && git describe --tag --always --dirty --match 'v[0-9]*')
-KIMG="${REGISTRY_HOST}/${REGISTRY_USER}/kernel:${PKGS_TAG}"
 docker pull -q "$KIMG" >/dev/null
 cid=$(docker create "$KIMG" sh); docker export "$cid" 2>/dev/null | tar t 2>/dev/null > "$BUILD_DIR/kfiles.txt"; docker rm "$cid" >/dev/null
-KVER=$(grep -oE 'usr/lib/modules/[^/]+' "$BUILD_DIR/kfiles.txt" | head -1 | cut -d/ -f4)
+# One awk reading the FILE, not a pipe: `grep ... | head -1` SIGPIPEs grep on a large listing and pipefail
+# then kills the build, which is exactly how a 75-minute run died once.
+# A STRING regex, not /.../: an unescaped slash inside [^/] would terminate a regex literal in awk.
+KVER=$(awk 'match($0, "usr/lib/modules/[^/]+") { s=substr($0, RSTART, RLENGTH); sub(/.*\//, "", s); print s; exit }' "$BUILD_DIR/kfiles.txt")
 [ -n "$KVER" ] || die "no module tree in ${KIMG}; the kernel build produced no modules"
 grep "usr/lib/modules/${KVER}/" "$BUILD_DIR/kfiles.txt" | sed "s#usr/lib/modules/${KVER}/##" | grep -vE '/$' | sort -u > "$BUILD_DIR/kexist.txt"
 MF="$CHK/talos/hack/modules-arm64.txt"
