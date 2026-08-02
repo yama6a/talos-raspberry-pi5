@@ -1,0 +1,18 @@
+# siderolabs/pkgs kernel patches to NOT apply, one subject slug per line. Blank lines and `#` comments are
+# ignored. A slug is the patch filename minus its NNNN- prefix, because pkgs renumbers its patch files.
+#
+# pkgs' patches target vanilla kernel.org; we build the raspberrypi fork, where some are already merged or
+# collide with the fork's own fix for the same bug. The build dry-runs every patch: whatever applies is
+# applied, only the slugs below are skipped, and anything else fails the build. A slug here that matches no
+# patch also fails the build, before the kernel download rather than during it.
+#
+# Both entries below come from the Pi 5 macb TX-stall series (raspberrypi/linux PR #7340). See docs/build.md
+# for how to re-check them after a pkgs bump; a conflict is not automatically a skip.
+
+# Already in the raspberrypi tree, which assigns MACB_CAPS_PCIE_POSTED_WRITES a different capability bit.
+net-macb-flush-PCIe-posted-write-after-TSTART-doorbe
+
+# Not in the raspberrypi tree. The fork recovers a lost TX-complete interrupt with a tx_pending breadcrumb in
+# the status-register read path instead of pkgs' per-queue delayed_work; we take the fork's version rather
+# than stacking both. It conflicts only on context, an unrelated `bool tx_pending;` mid-hunk.
+net-macb-add-TX-stall-watchdog-to-recover-from-lost-

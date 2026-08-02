@@ -1,0 +1,47 @@
+# Static checks only. The image build is its own workflow and does not run on pull requests: a full build is
+# ~65 min of runner time, and a broken bump surfaces on main instead.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: shellcheck
+        # -S warning: only report warnings and errors, so info-level noise does not fail the job.
+        # -e SC2034 is "X appears unused", which fires on common.sh's shared constants. They ARE used, by the
+        # scripts that source it, but shellcheck reads one file at a time so it never sees the use.
+        run: shellcheck -S warning -e SC2034 lib/*.sh
+
+  yaml:
+    name: yaml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: yamllint
+        run: pipx run yamllint -c .yamllint.yml .
+      - name: actionlint # lints these workflow files, and shellchecks their run: blocks
+        run: |
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz \
+            | tar xz actionlint
+          ./actionlint -color
+
+  renovate-config:
+    name: renovate-config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: validate renovate.json5 # a broken config silently halts ALL dependency updates
+        run: npx --yes --package renovate -- renovate-config-validator --strict renovate.json5

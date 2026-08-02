@@ -1,0 +1,97 @@
+# Builds, validates and releases the image. Runs on a free arm64 runner so the kernel compiles natively; an
+# amd64 runner would need QEMU and blow the 6h job cap.
+name: build
+
+on:
+  push:
+    branches: [main]
+    paths: # everything that can change what gets built; docs and config cannot
+      - versions.env
+      - lib/**
+      - kernel/**
+      - build/**
+      - .github/workflows/build.yaml
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even when the inputs match the newest release
+        default: false
+        type: boolean
+      dryRun:
+        description: Build and validate only, publish nothing
+        default: false
+        type: boolean
+
+# Never in parallel: the build revision is derived from the published releases, so two runs would pick the
+# same N. Queue instead of cancelling, so a push during a build is not silently dropped.
+concurrency:
+  group: build
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the release
+  packages: write # push to GHCR
+  id-token: write # provenance attestation
+  attestations: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm # 4 vCPU / 16 GB, free and unlimited on public repos, native arm64
+    timeout-minutes: 330 # the hard cap is 360; a full cold build is ~65 min
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PRUNE_BUILD_CACHE: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: resolve inputs
+        run: make resolve
+
+      - name: decide whether to build
+        id: guard
+        run: bash lib/should_build.sh
+        env:
+          FORCE: ${{ inputs.force }}
+
+      - name: free disk
+        # The runner pool is heterogeneous: usually ~109 GB free, sometimes ~37 GB, and a cold kernel build
+        # is the thing that would run out. Only language runtimes nothing here uses. Deliberately NOT the
+        # hosted toolcache, which is where `go` lives, and not the swapfile, which ThinLTO linking may want.
+        if: steps.guard.outputs.build == 'true'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
+          df -h /
+
+      - name: build
+        if: steps.guard.outputs.build == 'true'
+        run: make build
+
+      - name: validate
+        if: steps.guard.outputs.build == 'true'
+        run: make validate
+
+      - name: publish to GHCR
+        id: publish
+        if: steps.guard.outputs.build == 'true' && !inputs.dryRun
+        run: make publish # writes RELEASE_TAG / IMAGE_DIGEST / IMAGE_REF to $GITHUB_OUTPUT
+
+      - name: attest the installer image
+        if: steps.publish.outcome == 'success'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.publish.outputs.IMAGE_DIGEST }}
+          push-to-registry: true
+
+      - name: attest the raw disk image
+        if: steps.publish.outcome == 'success'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: .cache/*/out/metal-arm64-rpi5.raw.xz
+
+      # Last on purpose: the release is what makes a build revision real. A run that dies before here leaves
+      # an image tag no release announced, and the next run reuses and overwrites that revision.
+      - name: create the release
+        if: steps.publish.outcome == 'success'
+        run: make release
