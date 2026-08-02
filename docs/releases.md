@@ -2,7 +2,8 @@
 
 ## Tags
 
-Three OCI tags per build, one GitHub release.
+Three OCI tags per build, one GitHub release. The same package also carries `kernel-<hash>` tags, which
+are the build's own kernel cache and not release artifacts.
 
 | Tag | Immutable | Points at |
 |---|---|---|
@@ -46,8 +47,8 @@ race for the same number.
 - A manual `workflow_dispatch`, with `force` to build anyway and `dryRun` to build and validate without
   publishing.
 
-Nothing else. There is no scheduled rebuild, and pull requests get static checks only, because a full build
-is over an hour of runner time.
+Nothing else. There is no scheduled rebuild, and pull requests get static checks only: a build whose kernel
+inputs changed is about 90 minutes of runner time.
 
 Every run resolves the inputs first, then compares the resulting fingerprint against `build-inputs.json` on
 the newest release for that Talos version. Identical means the push changed nothing that reaches the image,

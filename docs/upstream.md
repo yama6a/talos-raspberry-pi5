@@ -18,7 +18,7 @@ At the time, none of these existed:
 - No official Talos Pi 5 image, and no `rpi_5` overlay in `siderolabs/sbc-raspberrypi`.
 - No RP1 ethernet in vanilla Linux, so the wired NIC needed the `raspberrypi/linux` fork.
 - The community `talos-rpi5/talos-builder` published prebuilt images, but its releases tracked an older Talos
-  minor than we wanted to run, and its overlay targeted older Talos machinery.
+  minor, and its overlay targeted older Talos machinery.
 
 So the build drove the community pipeline and rebased it onto a current Talos. That reasoning was correct then
 and is mostly obsolete now.
@@ -61,7 +61,9 @@ arp -n <node>     ->  (incomplete)          no layer-2 presence at all
 nc -vz <node> 50000 -> no route to host
 ```
 
-Recovered by reflashing and rejoining. Runbook for that is in the cluster repo's node-recovery doc.
+Recovered by reflashing the NVMe and rejoining the node. Worth knowing before you try this on anything you
+care about: a replaced node needs its stale etcd member removed and its node-local PVCs deleted before the
+cluster is whole again.
 
 ## Root cause
 
@@ -91,8 +93,8 @@ The boot chain, and where it stops:
 4. Boot halts in U-Boot. No kernel, no NIC, no ARP.
 
 The overlay does carry a `0002-rpi-add-NVMe-to-boot-order.patch`, which is presumably why this shipped: NVMe is
-in the boot order, it just cannot be enumerated. `sdhci` being present is why SD-card boot works for other
-people and NVMe does not for us.
+in the boot order, it just cannot be enumerated. `sdhci` being present is why the official overlay boots fine
+from an SD card and not at all from NVMe.
 
 ## Kernel and DTB are a matched pair
 
@@ -116,9 +118,14 @@ Vanilla reaches the same place by a different route: an `rp1_nexus` node with `c
 `rp1-nexus.dtsi`, upstream `clk-rp1` and `pinctrl-rp1`, and `macb` matching `raspberrypi,rp1-gem`. No MFD, no
 firmware driver.
 
-Two mechanisms, selected by which DTB you boot. You cannot mix a fork kernel with vanilla DTBs or the reverse.
-The official overlay is internally consistent, vanilla kernel plus DTBs derived from the Talos kernel package,
-so a migration has to move kernel and DTB together.
+Two mechanisms, selected by which DTB you boot, and you cannot mix one kernel with the other's DTBs. That
+sounds like a barrier and is not: `internal/base/pkg.yaml` in the overlay pulls `/dtb` straight out of the
+kernel image it is given, so the device tree follows the kernel automatically. Hand it a stock Talos kernel
+and it compiles vanilla DTBs to match.
+
+So swapping the kernel is mechanically cheap. What is unproven is whether the vanilla RP1 bring-up works on
+this hardware at all, because the U-Boot failure meant it never got to run. That is what
+[../FUTURE_WORK.md](../FUTURE_WORK.md) step 1 exists to answer.
 
 ## System extensions contribute nothing to this question
 
@@ -142,9 +149,9 @@ one with both extensions produce different schematic IDs.
 | Step | Verdict | Why |
 |---|---|---|
 | Community U-Boot, via the community overlay | **load-bearing** | the only source of `brcm,bcm2712-pcie` |
-| Fork kernel plus `MFD_RP1`, `FIRMWARE_RP1`, `MBOX_RP1`, `COMMON_CLK_RP1_SDIO`, `BCM2712_IOMMU` | **load-bearing as paired with the fork DTB** | they are the RP1 bring-up path in use |
+| Fork kernel plus `MFD_RP1`, `FIRMWARE_RP1`, `MBOX_RP1`, `COMMON_CLK_RP1_SDIO`, `BCM2712_IOMMU` | **in use, not proven necessary** | the RP1 bring-up this image runs on. Vanilla has its own path, untested here |
 | REBASE 1, kernel source and config | load-bearing | follows from the above |
-| REBASE 2, module list filter | consequence only | exists because we build a different kernel |
+| REBASE 2, module list filter | consequence only | exists only because this build uses a different kernel |
 | REBASE 3, overlay machinery port | consequence only | the community overlay targets old machinery; the official one does not need it |
 | REBASE 4, force the `rpi5` grub profile | **obsolete** | the official profile is already `bootloader: grub`, and the upgrade log confirms grub ran |
 | 4K pages | **obsolete as a reason** | stock Talos arm64 is already 4K. Kept as an assertion because the kernel source is a Pi tree whose own defconfig is 16K |

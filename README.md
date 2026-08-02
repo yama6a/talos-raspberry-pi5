@@ -39,11 +39,10 @@ sudo dd if=metal-arm64-rpi5.raw of=/dev/<disk> bs=4M status=progress conv=fsync
 ```
 
 Find `<disk>` with `lsblk` on Linux or `diskutil list` on macOS, and use the whole device (`/dev/sda`,
-`/dev/disk6`), not a partition. On macOS write to `/dev/rdisk6` instead, which is far faster, after
-`diskutil unmountDisk`.
+`/dev/disk6`), not a partition.
 
-Slot the drive in, power on with no SD card, and the Pi boots into Talos maintenance mode. Configure it from
-there as usual, with `talosctl gen config` and `talosctl apply-config`.
+Slot the NVMe drive in, power on with no SD card, and the Pi boots into Talos maintenance mode. Configure
+it from there as usual, with `talosctl gen config` and `talosctl apply-config`.
 
 The Pi 5's bootloader must be set to try NVMe. If it is not, flash the EEPROM first with `BOOT_ORDER` and,
 for third-party PCIe boards with no ID EEPROM, `PCIE_PROBE=1`.
@@ -58,11 +57,11 @@ No reflash: Talos upgrades are atomic A/B with rollback.
 
 ## Pinning
 
-| Tag | Moves | Use it for |
-|---|---|---|
-| `v1.13.7` | on every rebuild of that Talos version | pin as `v1.13.7@sha256:...` and let Renovate bump the digest |
-| `v1.13.7-2` | never | reproducing or rolling back to one exact build |
-| `latest` | on every release | trying it out, nothing else |
+| Tag         | Moves                                  | Use it for                                                   |
+|-------------|----------------------------------------|--------------------------------------------------------------|
+| `v1.13.7`   | on every rebuild of that Talos version | pin as `v1.13.7@sha256:...` and let Renovate bump the digest |
+| `v1.13.7-2` | never                                  | reproducing or rolling back to one exact build               |
+| `latest`    | on every release                       | trying it out, nothing else                                  |
 
 ## Verify a release
 
@@ -78,12 +77,12 @@ SPDX record with per-component licenses.
 ## Build it yourself
 
 ```
-make build      # ~40 min on an M2 Pro, ~65 min on a 4-core arm64 runner
+make build      # ~40 min cold on an M2 Pro, ~8 min when the kernel cache hits
 make validate   # partition layout, Pi 5 boot bits, kernel label, baked extensions
 ```
 
 Needs an arm64 host (macOS/Apple Silicon or arm64 Linux), Docker with 60 GB or so of free disk, GNU make >= 4,
-and `git curl jq go python3 perl`. `make help` lists everything. Details in [docs/build.md](docs/build.md).
+and `git curl jq go python3 perl crane`. `make help` lists everything. Details in [docs/build.md](docs/build.md).
 
 To build a variant, edit [`versions.env`](versions.env) or [`kernel/pi5-rpi.fragment`](kernel/pi5-rpi.fragment).
 A fork publishes to its own GHCR namespace with no further edits.

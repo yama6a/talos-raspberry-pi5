@@ -3,11 +3,15 @@
 ## Why a fork kernel at all
 
 Not because vanilla lacks RP1 any more. Vanilla carries the Pi 5's wired NIC as of Linux 6.18, and stock Talos
-enables it. The fork is here because kernel and device tree are a matched pair, and the community overlay this
-build depends on for its Pi 5 U-Boot ships the fork's DTBs, which expect the fork's RP1 drivers. Swapping the
-kernel means swapping the overlay, which means losing the only U-Boot that can boot a Pi 5 from NVMe.
+enables it.
 
-Full reasoning, and what would have to change to drop the fork, in [upstream.md](upstream.md).
+The honest answer is that this is the configuration known to work here, not one proven necessary. The fork
+kernel and its RP1 drivers boot these boards; the vanilla path has never been booted on them. Swapping is
+mechanically easy, since the overlay compiles the device tree from whichever kernel image it is handed, so
+kernel and DTB stay consistent either way. What is unproven is the RP1 bring-up itself.
+
+The gap that IS proven is U-Boot, not the kernel. See [upstream.md](upstream.md), and
+[../FUTURE_WORK.md](../FUTURE_WORK.md) for the test that would settle the kernel question.
 
 On this image RP1 comes up through `MFD_RP1` and `FIRMWARE_RP1`, which are fork-only. Vanilla instead
 describes RP1 as a PCI device in `rp1-nexus.dtsi` and needs neither. Both routes end at `macb` driving `end0`.
@@ -80,7 +84,7 @@ What each line does relative to the stock config, which is what to check before 
 
 | Symbols | Against the stock Talos arm64 config |
 |---|---|
-| `MFD_RP1`, `MBOX_RP1`, `FIRMWARE_RP1`, `COMMON_CLK_RP1_SDIO`, `BCM2712_IOMMU` | absent. The real additions, and the reason for the whole build |
+| `MFD_RP1`, `MBOX_RP1`, `FIRMWARE_RP1`, `COMMON_CLK_RP1_SDIO`, `BCM2712_IOMMU` | absent from stock. The RP1 bring-up this image actually uses |
 | `BLK_DEV_NVME` | stock builds it as a module; here it is `=y` |
 | `ARM64_4K_PAGES`, `PCIE_BRCMSTB`, `MACB`, `BCM2835_WDT`, `WATCHDOG`, `PINCTRL_RP1`, `COMMON_CLK_RP1`, `PINCTRL_BCM2712`, `BCM2712_MIP`, `INET_DIAG_DESTROY` | already `=y`. Asserted so a config change upstream cannot drop one silently |
 
