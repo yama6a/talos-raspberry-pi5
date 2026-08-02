@@ -63,6 +63,15 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
           df -h /
 
+      - name: install crane
+        # Talos's own installer target shells out to `crane push`. Pinned release binary rather than a
+        # third-party action, matching how ci.yaml installs actionlint and kubeconform.
+        if: steps.guard.outputs.build == 'true'
+        run: |
+          curl -fsSL https://github.com/google/go-containerregistry/releases/download/v0.21.8/go-containerregistry_Linux_arm64.tar.gz \
+            | tar xz crane
+          sudo mv crane /usr/local/bin/ && crane version
+
       - name: build
         if: steps.guard.outputs.build == 'true'
         run: make build
