@@ -25,12 +25,16 @@ _auth=()
 [ -n "${GITHUB_TOKEN:-}" ] && _auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 RELEASES=$(curl -fsSL --retry 3 ${_auth[@]+"${_auth[@]}"} \
   "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" 2>/dev/null || true)
-EXISTING=$(printf '%s' "$RELEASES" \
-  | jq -r --arg t "$TALOS_VERSION" '.[]?.tag_name | select(startswith($t + "-")) | ltrimstr($t + "-")' 2>/dev/null \
-  | grep -E '^[0-9]+$' | sort -n | tail -1)
-REVISION=$(( ${EXISTING:-0} + 1 ))
+# All in jq, deliberately: `... | grep | sort | tail` exits 1 when nothing matches, which is the NORMAL case
+# for the first release of a Talos version, and pipefail turns that into a silent build failure.
+EXISTING=$(printf '%s' "$RELEASES" | jq -r --arg t "$TALOS_VERSION" \
+  '[.[]?.tag_name // empty | select(startswith($t + "-")) | ltrimstr($t + "-")
+    | select(test("^[0-9]+$")) | tonumber] | max // 0' 2>/dev/null || echo 0)
+[ -n "$EXISTING" ] || EXISTING=0
+REVISION=$(( EXISTING + 1 ))
 RELEASE_TAG="${TALOS_VERSION}-${REVISION}"
-echo "   ${RELEASE_TAG}${EXISTING:+  (previous: ${TALOS_VERSION}-${EXISTING})}"
+if [ "$EXISTING" -eq 0 ]; then echo "   ${RELEASE_TAG}  (first release for ${TALOS_VERSION})"
+else echo "   ${RELEASE_TAG}  (previous: ${TALOS_VERSION}-${EXISTING})"; fi
 
 say "staging release assets in ${OUT_DIR}"
 cp "$INPUTS_FILE" "${OUT_DIR}/build-inputs.json"
