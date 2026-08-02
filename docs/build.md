@@ -35,10 +35,12 @@ build creates its own `docker-container` builder.
   BuildKit snapshots are what fill it.
 - GNU make >= 4. macOS ships 3.81, which the upstream Makefiles refuse to run; `brew install make` installs
   it as `gmake` and the build finds it.
-- `docker git curl jq go python3 perl`. The build checks and names each one. `xz` and `zstd` are only needed
+- `docker git curl jq go python3 perl crane`. The build checks and names each one; `crane` is needed
+  because Talos's own installer target shells out to it. `xz` and `zstd` are only needed
   inside the validation container, not on the host.
 
-Roughly 40 minutes on an M2 Pro (12 cores), 65 minutes on a 4-core arm64 GitHub runner.
+A cold build is roughly 40 minutes on an M2 Pro (12 cores) and 90 on a 4-core arm64 GitHub runner, almost
+all of it the kernel. With the kernel cache warm it is about 8 minutes.
 
 ## The build cache
 
@@ -123,8 +125,8 @@ report `-dirty` and stamp that onto the OS version.
 siderolabs/pkgs carries kernel patches written against vanilla kernel.org. This builds `raspberrypi/linux`,
 where some are already merged or collide with the fork's own fix for the same bug. Each patch is dry-run
 first: whatever applies is applied, only the slugs in `kernel/patch-skip.txt` are skipped, and anything else
-fails the build. So a pkgs bump that adds a patch we cannot apply stops the build instead of quietly dropping
-a fix.
+fails the build. So a pkgs bump that adds a patch this build cannot apply stops it, instead of quietly
+dropping a fix.
 
 A slug is the patch filename minus its `NNNN-` prefix, because pkgs renumbers its patch files. A slug that
 matches no patch also fails the build, before the kernel download. The first thing to check there is a
