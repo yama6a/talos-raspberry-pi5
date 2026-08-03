@@ -96,9 +96,9 @@ The overlay does carry a `0002-rpi-add-NVMe-to-boot-order.patch`, which is presu
 in the boot order, it just cannot be enumerated. `sdhci` being present is why the official overlay boots fine
 from an SD card and not at all from NVMe.
 
-## Kernel and DTB are a matched pair
+## Kernel and DTB move together
 
-This is the part that makes the migration all-or-nothing.
+RP1 has two possible bring-up mechanisms, and which one applies follows from the kernel.
 
 On this build's image, RP1 comes up through the fork's own drivers:
 
