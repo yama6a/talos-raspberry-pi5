@@ -22,8 +22,8 @@ source "$VERSIONS_FILE"
 MACHINERY_VERSION="${TALOS_VERSION}"        # the overlay is rebuilt against this (must match TALOS_VERSION)
 IMAGE_NAME="metal-arm64-rpi5.raw.xz"        # the staged raw disk image (the rpi5/grub imager emits .raw.xz)
 
-# GHCR namespace. Derived from the repo slug, lowercased because GHCR rejects uppercase, so a fork publishes
-# to its own namespace with no edit. CI sets GITHUB_REPOSITORY; locally it falls back to upstream.
+# Lowercased because GHCR rejects uppercase, and derived from the repo slug so a fork publishes to its own
+# namespace with no edit. CI sets GITHUB_REPOSITORY; locally it falls back to upstream.
 GHCR_SERVER="ghcr.io"
 : "${GITHUB_REPOSITORY:=yama6a/talos-raspberry-pi5}"
 IMAGE_REPO="${GHCR_SERVER}/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
@@ -64,7 +64,6 @@ require() {
 # macOS ships `shasum` and no `sha256sum`; most Linux images ship both. Prefer the coreutils tool.
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 sha512() { if command -v sha512sum >/dev/null; then sha512sum "$@"; else shasum -a 512 "$@"; fi; }
-# Hash stdin or a file down to the bare hex, no filename column.
 sha256hex() { sha256 "$@" | awk '{print $1}'; }
 sha512hex() { sha512 "$@" | awk '{print $1}'; }
 
@@ -83,8 +82,8 @@ gnu_make() {
   die "GNU make >= 4 not found (macOS: brew install make, which installs it as gmake; Debian/Ubuntu: apt install make)"
 }
 
-# load_inputs: read the resolver's build-inputs.json into shell vars and derive the cache paths from it.
-# Every script after resolve_inputs.sh calls this.
+# Reads the resolver's build-inputs.json into shell vars and derives the cache paths from it. Every script
+# after resolve_inputs.sh calls this.
 load_inputs() {
   [ -f "$INPUTS_FILE" ] || die "missing ${INPUTS_FILE}, run: make resolve"
   local j="$INPUTS_FILE"
@@ -95,7 +94,7 @@ load_inputs() {
   KERNEL_SOURCE=$(jq -r '.kernel_source' "$j")  # which firmware ref we found the commit through
   BUILD_KEY=$(jq -r '.build_key' "$j")
   FINGERPRINT=$(jq -r '.fingerprint' "$j")
-  KERNEL_KEY=$(jq -r '.kernel_key' "$j")   # narrower than the fingerprint: keys the cross-run kernel cache
+  KERNEL_KEY=$(jq -r '.kernel_key' "$j")        # narrower than the fingerprint: keys the cross-run kernel cache
   [ "$(jq -r '.talos' "$j")" = "$TALOS_VERSION" ] \
     || die "${INPUTS_FILE} was resolved for $(jq -r '.talos' "$j"), but versions.env now says ${TALOS_VERSION}. Re-run: make resolve"
   BUILD_DIR="${CACHE_DIR}/${BUILD_KEY}"   # build scratch: upstream checkouts, kernel tarball, staged image
@@ -103,7 +102,7 @@ load_inputs() {
   META_FILE="${OUT_DIR}/build-meta.env"   # what the build resolved only by building; validate/publish read it
 }
 
-# load_meta: the build's own output facts (kernel version actually compiled, the image tags it produced).
+# The build's own output facts (kernel version actually compiled, the image tags it produced).
 load_meta() {
   [ -f "$META_FILE" ] || die "missing ${META_FILE}, run: make build"
   # shellcheck disable=SC1090

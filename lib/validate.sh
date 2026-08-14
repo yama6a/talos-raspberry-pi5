@@ -1,40 +1,44 @@
 #!/usr/bin/env bash
-# Checks the built image without hardware: partition layout, the Pi 5 boot bits on the EFI partition, the
-# kernel the installer actually carries, and the baked system extensions.
-# macOS cannot loop-mount Linux filesystems, so both checks run inside a Linux container.
-# Deliberately not `set -e`: every check runs and the summary reports all failures at once.
+# Checks the built image offline: partition layout, Pi 5 boot bits, kernel label, baked extensions.
+# No `set -e`: every check runs and the summary reports all failures at once.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
-# ---- knobs ------------------------------------------------------------------
+# ---- knobs ----
 # renovate: datasource=docker
-ALPINE_IMAGE="alpine:3.24"     # throwaway container for the raw-image and boot-binary checks
+ALPINE_IMAGE="alpine:3.24"     # macOS cannot loop-mount Linux filesystems, so the checks run in here
 MIN_BYTES=50000000             # a plausible compressed image is between these two
 MAX_BYTES=600000000
 
-require docker jq
-load_inputs
-load_meta
-[ -f "$IMAGE_FILE" ] || die "missing ${IMAGE_FILE}, run: make build"
+# ---- state ----
+UKI_DIR=""   # set by extract_uki, read by check_kernel_and_extensions
 
-say "OFFLINE VALIDATION"
+# ---- functions ----
+
+assert_image_built() {
+  [ -f "$IMAGE_FILE" ] || die "missing ${IMAGE_FILE}, run: make build"
+}
 
 # The installer's boot binary is a UKI: one EFI file holding the kernel, initrd and cmdline together.
-UKI_DIR="$BUILD_DIR/uki"; rm -rf "$UKI_DIR"; mkdir -p "$UKI_DIR"
-if docker pull -q "$INSTALLER_IMG" >/dev/null 2>&1; then
-  cid=$(docker create "$INSTALLER_IMG" sh)
+extract_uki() {
+  UKI_DIR="$BUILD_DIR/uki"; rm -rf "$UKI_DIR"; mkdir -p "$UKI_DIR"
+  if ! docker pull -q "$INSTALLER_IMG" >/dev/null 2>&1; then
+    bad "cannot pull ${INSTALLER_IMG} (is the local registry container still running?)"
+    return 1
+  fi
+  local cid
+  cid="$(docker create "$INSTALLER_IMG" sh)"
   docker cp "$cid:/usr/install/arm64/vmlinuz.efi" "$UKI_DIR/vmlinuz.efi" >/dev/null 2>&1
   docker rm "$cid" >/dev/null
   chmod 644 "$UKI_DIR/vmlinuz.efi" 2>/dev/null
-else
-  bad "cannot pull ${INSTALLER_IMG} (is the local registry container still running?)"
-fi
+  return 0
+}
 
-# 1. raw image: integrity, size, partition layout and Pi 5 boot bits.
-if docker run --rm --privileged -e IMAGE_NAME="$IMAGE_NAME" -e MIN="$MIN_BYTES" -e MAX="$MAX_BYTES" \
-     -v "$OUT_DIR:/work" -v /dev:/dev "$ALPINE_IMAGE" sh -c '
+check_raw_image() {
+  if docker run --rm --privileged -e IMAGE_NAME="$IMAGE_NAME" -e MIN="$MIN_BYTES" -e MAX="$MAX_BYTES" \
+       -v "$OUT_DIR:/work" -v /dev:/dev "$ALPINE_IMAGE" sh -c '
   set -e; apk add -q util-linux xz >/dev/null 2>&1; cd /work; F="$IMAGE_NAME"; RAW="${IMAGE_NAME%.xz}"
   fail=0
   xz -t "$F" && echo "  integrity (xz -t)" || { echo "  FAILED integrity"; fail=1; }
@@ -50,13 +54,14 @@ if docker run --rm --privileged -e IMAGE_NAME="$IMAGE_NAME" -e MIN="$MIN_BYTES" 
   umount /e; losetup -d "$LOOP"; rm -f "$RAW"
   exit $fail
 '; then ok "raw image: integrity, size, partition layout, Pi 5 boot bits"
-else bad "raw image validation failed (see above)"
-fi
+  else bad "raw image validation failed (see above)"
+  fi
+}
 
-# 2. Kernel version and baked extensions, read out of the UKI. Its .uname section is the version LABEL, and
-#    the imager writes that from Talos's DefaultKernelVersion rather than from our kernel, so cross-check it
-#    against the kernel we ACTUALLY compiled. A mismatch means a mislabeled image.
-if docker run --rm -e KVER="$KVER" -e WANT="$KERNEL_VERSION" -v "$UKI_DIR:/w" "$ALPINE_IMAGE" sh -c '
+# The UKI's .uname section is the version LABEL, written from Talos's DefaultKernelVersion rather than from
+# our kernel, so cross-check it against what we actually compiled. A mismatch means a mislabeled image.
+check_kernel_and_extensions() {
+  if docker run --rm -e KVER="$KVER" -e WANT="$KERNEL_VERSION" -v "$UKI_DIR:/w" "$ALPINE_IMAGE" sh -c '
   apk add -q python3 xz zstd >/dev/null 2>&1
   python3 - <<PY
 import struct
@@ -76,11 +81,28 @@ PY
   echo "$ext" | grep -qx iscsi-tools && echo "  extension iscsi-tools" || { echo "  FAILED iscsi-tools not baked in"; exit 1; }
   echo "$ext" | grep -qx util-linux-tools && echo "  extension util-linux-tools" || { echo "  FAILED util-linux-tools not baked in"; exit 1; }
 '; then ok "installer: kernel label matches the built kernel, both extensions baked in"
-else bad "installer/kernel validation failed (see above)"
-fi
+  else bad "installer/kernel validation failed (see above)"
+  fi
+}
+
+print_result() {
+  say "VALIDATION PASSED"
+  echo "   image:     ${IMAGE_FILE}"
+  echo "   installer: ${INSTALLER_IMG}"
+  echo "   next:      make publish"
+}
+
+# ---- main ----
+
+require docker jq
+load_inputs
+load_meta
+assert_image_built
+
+say "OFFLINE VALIDATION"
+extract_uki
+check_raw_image
+check_kernel_and_extensions
 
 summary || die "VALIDATION FAILED"
-say "VALIDATION PASSED"
-echo "   image:     ${IMAGE_FILE}"
-echo "   installer: ${INSTALLER_IMG}"
-echo "   next:      make publish"
+print_result

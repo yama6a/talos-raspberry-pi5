@@ -1,18 +1,29 @@
 #!/usr/bin/env bash
-# Decides whether the resolved inputs differ from the newest published build of this Talos version. Cheap:
-# resolve_inputs.sh already did the work, this only fetches one release asset.
-# Prints `build=true|false` plus a reason, and appends the same to $GITHUB_OUTPUT when CI set it.
-# Set FORCE=true to always answer true.
+# Answers whether the resolved inputs differ from the newest published build of this Talos version.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
-require curl jq
-load_inputs
+usage() {
+  cat <<EOF
+should_build.sh
+  prints  build=true|false  plus a reason, and appends both to \$GITHUB_OUTPUT when CI set it
+  FORCE=true  always answer true
+EOF
+}
 
-_auth=()
-[ -n "${GITHUB_TOKEN:-}" ] && _auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+# ---- state ----
+AUTH=()   # set by use_github_token, read by gh_get
+
+# ---- functions ----
+
+use_github_token() {
+  [ -n "${GITHUB_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  return 0
+}
+
+gh_get() { curl -fsSL --retry 3 ${AUTH[@]+"${AUTH[@]}"} "$@"; }
 
 decide() {
   printf 'build=%s\n' "$1"
@@ -21,17 +32,32 @@ decide() {
   exit 0
 }
 
+newest_release_tag() {
+  local releases
+  releases="$(gh_get "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" 2>/dev/null || true)"
+  printf '%s' "$releases" | jq -r --arg t "$TALOS_VERSION" \
+    '[.[]?.tag_name | select(startswith($t + "-"))] | sort_by(ltrimstr($t + "-") | tonumber) | last // ""' 2>/dev/null
+}
+
+published_fingerprint() {
+  gh_get "https://github.com/${GITHUB_REPOSITORY}/releases/download/${1}/build-inputs.json" 2>/dev/null \
+    | jq -r '.fingerprint // ""' 2>/dev/null || true
+}
+
+# ---- main ----
+
+case "${1:-}" in -h|--help) usage; exit 0 ;; esac
+
+require curl jq
+load_inputs
+use_github_token
+
 [ "${FORCE:-false}" = "true" ] && decide true "forced"
 
-# The newest release for this Talos version, by build revision.
-RELEASES=$(curl -fsSL --retry 3 ${_auth[@]+"${_auth[@]}"} \
-  "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" 2>/dev/null || true)
-LATEST=$(printf '%s' "$RELEASES" \
-  | jq -r --arg t "$TALOS_VERSION" '[.[]?.tag_name | select(startswith($t + "-"))] | sort_by(ltrimstr($t + "-") | tonumber) | last // ""' 2>/dev/null)
+LATEST="$(newest_release_tag)"
 [ -n "$LATEST" ] || decide true "no release exists for ${TALOS_VERSION} yet"
 
-PREV=$(curl -fsSL --retry 3 ${_auth[@]+"${_auth[@]}"} \
-  "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST}/build-inputs.json" 2>/dev/null | jq -r '.fingerprint // ""' 2>/dev/null || true)
+PREV="$(published_fingerprint "$LATEST")"
 [ -n "$PREV" ] || decide true "${LATEST} has no readable build-inputs.json to compare against"
 
 [ "$PREV" = "$FINGERPRINT" ] \
