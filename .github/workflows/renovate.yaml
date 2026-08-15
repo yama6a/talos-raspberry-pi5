@@ -30,11 +30,26 @@ concurrency:
 permissions:
   contents: read # Renovate acts through RENOVATE_TOKEN, not GITHUB_TOKEN
 
+env:
+  cache_dir: /tmp/renovate/cache/renovate/repository # renovate's own path, pointing it elsewhere breaks container perms
+
 jobs:
   renovate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: restore renovate cache
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.cache_dir }}
+          key: renovate-cache-${{ github.run_id }}-${{ github.run_attempt }} # unique per run, so it never hits and every run saves a fresh one
+          restore-keys: renovate-cache- # the actual restore: newest previous cache
+      - name: chown the restored cache
+        if: steps.cache.outputs.cache-matched-key != ''
+        # actions/cache restores as the runner user, renovate reads it as uid 12021 inside its container, and an
+        # unreadable cache is silently treated as absent.
+        run: sudo chown -R 12021:0 /tmp/renovate/
       - uses: renovatebot/github-action@e09d604f8f803bb527bd8321ed5be06c460b8682 # v46.2.2
         with:
           # A dedicated PAT: GITHUB_TOKEN cannot open PRs that re-trigger workflows, and lacks the scope.
@@ -43,3 +58,12 @@ jobs:
           RENOVATE_REPOSITORIES: ${{ github.repository }} # this repo only, no org-wide autodiscover
           LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
           RENOVATE_DRY_RUN: ${{ inputs.dryRun && 'full' || '' }}
+          # Without a restored cache Renovate cannot tell an open branch is still current, so it rebuilds and
+          # force-pushes it every run, which restarts CI and starves automerge.
+          RENOVATE_REPOSITORY_CACHE: enabled
+      - name: save renovate cache
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.cache_dir }}
+          key: renovate-cache-${{ github.run_id }}-${{ github.run_attempt }}
