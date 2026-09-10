@@ -53,7 +53,8 @@ for third-party PCIe boards with no ID EEPROM, `PCIE_PROBE=1`.
 talosctl upgrade --nodes <node-ip> --image ghcr.io/yama6a/talos-raspberry-pi5:v1.13.7
 ```
 
-No reflash: Talos upgrades are atomic A/B with rollback.
+No reflash: Talos upgrades are atomic A/B with rollback. Before moving to a new Talos minor, read
+[docs/upgrade.md](docs/upgrade.md).
 
 ## Pinning
 
@@ -77,6 +78,7 @@ SPDX record with per-component licenses.
 ## Build it yourself
 
 ```
+make preflight  # a few min, no Docker: checkouts, the pkg.yaml rewrites, the overlay port
 make build      # ~40 min cold on an M2 Pro, ~8 min when the kernel cache hits
 make validate   # partition layout, Pi 5 boot bits, kernel label, baked extensions
 ```

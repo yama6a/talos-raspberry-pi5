@@ -1,0 +1,43 @@
+# The cheap half of the build, run against a moved pin: the upstream checkouts still look the way the build
+# expects, the files the build rewrites still have their anchors, and the overlay still compiles against this
+# Talos's machinery. Runs the same lib/preflight.sh that build.sh sources, so it cannot drift from the build.
+#
+# Deliberately does NOT touch the kernel: no source download, no patch replay, no olddefconfig. Those need the
+# real toolchain to mean anything, and the failure they would pre-empt costs one red build workflow, because
+# build.yaml gates publish and release on the build succeeding.
+#
+# Signal for the hand review of a Talos minor or major (docs/upgrade.md); a gate only for renovate's automerge
+# of the combined non-major PR, together with the main-is-green job in ci.yaml.
+name: preflight
+
+on:
+  pull_request:
+    branches: [main]
+    paths: # only a moved pin or a change to what preflight reads can fail this
+      - versions.env
+      - kernel/patch-skip.txt
+      - lib/preflight.sh
+      - build/Makefile.talos
+  workflow_dispatch:
+
+concurrency:
+  group: preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: preflight
+    # arm64 to match the build, so the overlay compiles for the architecture it actually ships on.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # resolve_inputs.sh walks the GitHub API; 60/h unauthenticated
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: preflight
+        # GOTOOLCHAIN=auto (the default) fetches whatever the overlay's go.mod asks for, so no Go pin here.
+        run: make preflight

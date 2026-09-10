@@ -16,3 +16,12 @@ net-macb-flush-PCIe-posted-write-after-TSTART-doorbe
 # the status-register read path instead of pkgs' per-queue delayed_work; we take the fork's version rather
 # than stacking both. It conflicts only on context, an unrelated `bool tx_pending;` mid-hunk.
 net-macb-add-TX-stall-watchdog-to-recover-from-lost-
+
+# The macb EEE series pkgs added for Talos 1.14 (mainline 7.1, backported onto 6.18). The raspberrypi tree
+# already carries all four, and has since at least the 6.18.44 this repo shipped for 1.13.9: `patch -N`
+# reports every hunk of three of them as previously applied, and the fourth's functions and gem_ethtool_ops
+# entries are present verbatim. Skipping them changes nothing in the built kernel. See docs/upgrade.md.
+net-cadence-macb-add-EEE-LPI-statistics-counters
+net-cadence-macb-implement-EEE-TX-LPI-support
+net-cadence-macb-add-ethtool-EEE-support
+net-cadence-macb-enable-EEE-for-Raspberry-Pi-RP1

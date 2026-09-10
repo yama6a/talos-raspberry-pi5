@@ -68,9 +68,10 @@
     },
     {
       // A Talos MAJOR or MINOR is never a digest swap: it can move the expected kernel version, the pkgs
-      // commit and the overlay's machinery API all at once, which is exactly what the three rebases absorb.
-      // Its own PR, reviewed, never automerged.
-      description: "Talos minor and major: reviewed alone, the rebases may need work",
+      // commit and its patch set, the stock kernel config, the overlay's machinery API and the machine config
+      // defaults all at once. preflight.yaml proves only the cheap half of that, so the PR is reviewed by hand
+      // against docs/upgrade.md, never automerged.
+      description: "Talos minor and major: reviewed alone against docs/upgrade.md",
       matchDepNames: ["siderolabs/talos"],
       matchUpdateTypes: ["major", "minor"],
       groupName: null, // out of the combined group above, or it would block that PR's automerge

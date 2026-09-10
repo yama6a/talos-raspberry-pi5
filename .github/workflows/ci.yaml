@@ -38,6 +38,34 @@ jobs:
             | tar xz actionlint
           ./actionlint -color
 
+  main-is-green:
+    name: main-is-green
+    # Stops a bump landing on top of an already-broken main, where the next red build tells you nothing new
+    # about the bump itself. Advisory for people and blocking for bots by construction: main has no branch
+    # protection, so a human can always merge past a red result (which is what the PR fixing main needs to
+    # do), while renovate waits for every check on the branch before it calls the merge API.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # gh run list
+    steps:
+      - name: last completed build on main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          run=$(gh run list --repo "${{ github.repository }}" --workflow build.yaml --branch main \
+                  --status completed --limit 1 --json conclusion,displayTitle,url)
+          conclusion=$(echo "$run" | jq -r '.[0].conclusion // "none"')
+          echo "$run" | jq -r '.[0] | "  \(.displayTitle)\n  \(.url)"' 2>/dev/null || true
+          case "$conclusion" in
+            failure|timed_out)
+              echo "::error::main's last build workflow ended in ${conclusion}. Fix main before landing another bump."
+              exit 1
+              ;;
+            none) echo "no completed build workflow on main yet" ;;
+            *) echo "main's last build workflow: ${conclusion}" ;;
+          esac
+
   renovate-config:
     name: renovate-config
     runs-on: ubuntu-latest

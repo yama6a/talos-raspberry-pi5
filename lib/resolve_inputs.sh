@@ -13,7 +13,7 @@ FW_CHANNELS="master stable next oldstable"  # raspberrypi/firmware refs to try f
 FW_HISTORY_PAGE=100                         # failsafe: how far back to walk master's extra/git_hash history
 # Only files that can change what gets built, so editing one cuts a new build revision. Docs, workflows and
 # the renovate config are excluded because they cannot.
-RECIPE_FILES="lib/build.sh build/Makefile.talos kernel/pi5-rpi.fragment kernel/patch-skip.txt"
+RECIPE_FILES="lib/build.sh lib/preflight.sh build/Makefile.talos kernel/pi5-rpi.fragment kernel/patch-skip.txt"
 
 # ---- state ----
 AUTH=()             # set by use_github_token, read by get

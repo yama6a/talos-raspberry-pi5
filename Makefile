@@ -12,6 +12,10 @@ help: ## Display this help.
 resolve: ## Resolve pkgs + kernel from the pinned Talos release into .cache/build-inputs.json (network only, ~10s).
 	bash lib/resolve_inputs.sh
 
+.PHONY: preflight
+preflight: resolve ## Check the bump without compiling: checkouts, pkgs patches, config fragment, overlay build. ~10 min.
+	bash lib/preflight.sh
+
 .PHONY: build
 build: resolve ## Build the kernel, overlay, installer and raw disk image. Long: ~40 min native arm64.
 	bash lib/build.sh

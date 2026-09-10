@@ -54,8 +54,8 @@ Every run resolves the inputs first, then compares the resulting fingerprint aga
 the newest release for that Talos version. Identical means the push changed nothing that reaches the image,
 and the run stops in under a minute.
 
-The fingerprint covers the resolved upstream refs plus a hash of `lib/build.sh`, `build/Makefile.talos`,
-`kernel/pi5-rpi.fragment` and `kernel/patch-skip.txt`. It deliberately excludes the docs, the README, the
+The fingerprint covers the resolved upstream refs plus a hash of `lib/build.sh`, `lib/preflight.sh`,
+`build/Makefile.talos`, `kernel/pi5-rpi.fragment` and `kernel/patch-skip.txt`. It deliberately excludes the docs, the README, the
 workflows and the renovate config. Editing a build script does cut a new revision, which is the honest
 answer, since the build script is the build.
 
