@@ -5,6 +5,7 @@
 | Step | Script | Does |
 |---|---|---|
 | `make resolve` | `lib/resolve_inputs.sh` | pure HTTP, ~10s. Writes `.cache/build-inputs.json` |
+| `make preflight` | `lib/preflight.sh` | the build's cheap checks, no Docker and no kernel. A few min |
 | `make build` | `lib/build.sh` | checkouts, three rebases, kernel, overlay, installer, raw image |
 | `make validate` | `lib/validate.sh` | offline checks against the built artifacts |
 | `make publish` | `lib/publish.sh` | GHCR push, SBOM, checksums, generated notes |
@@ -26,6 +27,35 @@ Step 4 is skipped entirely when a cached kernel matches, see [the kernel cache](
 The registry is local (`localhost:5010`) because it is fast, works offline, and supports the BuildKit merge
 operation that siderolabs' `bldr` needs. The builder inside dockerd refuses that operation, which is why the
 build creates its own `docker-container` builder.
+
+## Preflight
+
+`lib/preflight.sh` is `build.sh`'s library, not a copy of it. `build.sh` sources it and calls the same
+functions, so a preflight check cannot drift from what the build does.
+
+Run alone it does only the parts that need no Docker, no kernel source and no compiler:
+
+| Proves | How |
+|---|---|
+| Talos names a pkgs commit and a kernel version that exist | `make resolve` |
+| the kernel version maps to a `raspberrypi/linux` commit | `resolve_kernel_commit`, see [kernel.md](kernel.md) |
+| the pkgs checkout matches what Talos names | `git describe` against the resolver |
+| `kernel/patch-skip.txt` names patches pkgs still has | glob `kernel/build/patches` |
+| the build's `pkg.yaml` rewrites still find their anchors | the patch-gate and config-merge injections |
+| Talos's Dockerfile still declares a frontend to mirror | line 1 `# syntax =` |
+| the overlay compiles against this Talos's machinery | REBASE 3, then `go build -o /dev/null` |
+
+Everything about the kernel is left to the real build on purpose: whether the pkgs patches still apply to the
+fork, whether the fragment survives `olddefconfig`, whether it compiles, whether the imager produces a
+bootable image. Replaying those on a runner needs the pkgs toolchain to mean anything, and the failure it
+would pre-empt costs one red `build` workflow, because `build.yaml` gates publish and release on the build
+succeeding. A bad bump cannot ship an image or cut a release.
+
+`.github/workflows/preflight.yaml` runs this on any PR that moves a pin, and `ci.yaml`'s `main-is-green` job
+refuses a PR when main's last `build` run failed. Renovate waits on both before automerging the combined
+non-major PR. A Talos minor or major is never automerged: preflight covers too little of what one can break,
+so it is reviewed by hand against [upgrade.md](upgrade.md). Neither check is enforced by branch protection, so
+a person can always merge past them; renovate cannot, which is the intent.
 
 ## Prerequisites
 
@@ -174,6 +204,15 @@ None of this proves the Pi 5 boot chain works. Only booting a board does.
 - `digest mismatch` on the kernel source: GitHub `/archive/` tarballs are not byte-stable. The local source
   server exists for exactly this. Nothing to do.
 - `pkgs checkout describes as X, but Talos names Y`: an upstream tag moved. Re-run `make resolve`.
+- `FAILED: pkgs patch does not apply to raspberrypi/linux: <slug>` during the kernel build: a pkgs bump added
+  or reworked a patch that collides with the fork. Re-run the patch by hand with `patch -p1 -N --dry-run`
+  against the extracted tree: `Reversed (or previously applied)` means the fix is already in the rpi tree, so
+  add the slug to `kernel/patch-skip.txt`. A real conflict means rebasing the patch onto the fork instead.
+  Note that `patch` defaults to fuzz 2, so a hunk reported as applied can still have landed on loose context.
+- `kernel/patch-skip.txt names a patch that pkgs does not have`: pkgs dropped or renamed it. The error lists
+  every slug pkgs currently ships, so match the entry to whichever is the same patch.
+- `kernel/build/pkg.yaml patch loop not found` or `anchor not found`: upstream restructured the file the build
+  rewrites. Re-derive the anchor in `lib/preflight.sh` against the new pkgs.
 - `grep: write error: Broken pipe` and the build dies: a producer was SIGPIPEd by an early-exiting consumer
   (`| head -1`, `| grep -q`) and `pipefail` turned that into a build failure. Read the file directly with an
   awk that exits, rather than piping. This killed a 75-minute run once, right after the kernel finished.
