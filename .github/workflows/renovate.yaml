@@ -3,9 +3,11 @@ name: Renovate
 
 on:
   schedule:
-    # Automerge needs frequent runs: Renovate opens the PR on one run and merges it on the NEXT one, once CI
-    # has passed. A merged bump lands on main, which is what triggers the image build.
-    - cron: "17 */3 * * *"
+    # Two runs a night, 30 min apart: the first opens PRs, the second merges the ones whose CI went green.
+    # Renovate never merges on the run that opened a PR, so a single nightly run would add a day of lag.
+    # A merged bump lands on main, which is what triggers the image build.
+    - cron: "13 5 * * *"
+    - cron: "43 5 * * *"
   workflow_dispatch:
     inputs:
       logLevel:
@@ -17,11 +19,6 @@ on:
         description: Dry run (extract + plan, open no PRs)
         default: false
         type: boolean
-  push:
-    branches: [main]
-    paths: # fast feedback while iterating on the config itself
-      - renovate.json5
-      - .github/workflows/renovate.yaml
 
 concurrency:
   group: renovate
@@ -35,7 +32,7 @@ env:
 
 jobs:
   renovate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: restore renovate cache
