@@ -5,21 +5,16 @@
   // Cadence is the cron in .github/workflows/renovate.yaml, not an internal `schedule`, so a manual
   // workflow_dispatch works too.
   //
+  // The shared preset carries the grouping, automerge and digest-pinning rules. Only what is specific
+  // to this repo lives below.
   // A merged bump pushes to main, and .github/workflows/build.yaml watches versions.env, so the image
   // rebuilds itself. It is fingerprint-guarded, so a bump that changes nothing resolvable builds nothing.
+  // CI cannot prove the image still builds (no build on PRs), so a bad bump surfaces as a red build
+  // workflow on main, not as a broken release.
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  extends: [
-    "config:recommended",
-    ":dependencyDashboard", // one issue listing every pending/failed update (needs repo Issues enabled)
-    "helpers:pinGitHubActionDigestsToSemver", // action pins carry a readable version alongside the digest
-  ],
-  prConcurrentLimit: 6,
-  prHourlyLimit: 0, // no hourly throttle
-  dependencyDashboardTitle: "Renovate dependency dashboard",
+  extends: ["github>yama6a/gha:default.json5"],
 
-  // Automerge through Renovate's own API call, not GitHub's native auto-merge, so the merge waits on the
-  // required CI checks and lands on a LATER run once they are green.
-  platformAutomerge: false,
+  prConcurrentLimit: 6,
 
   customManagers: [
     {
@@ -58,15 +53,6 @@
 
   packageRules: [
     {
-      // ONE combined, auto-merged PR for every NON-major update, gated on the required CI checks. Merging it
-      // triggers a rebuild, which is the intended loop: CI cannot prove the image still builds (no build on
-      // PRs), so a bad bump surfaces as a red build workflow on main, not as a broken release.
-      description: "combine all non-major updates into one auto-merged PR",
-      matchUpdateTypes: ["minor", "patch", "digest", "pin"],
-      groupName: "all non-major dependencies",
-      automerge: true,
-    },
-    {
       // A Talos MAJOR or MINOR is never a digest swap: it can move the expected kernel version, the pkgs
       // commit and its patch set, the stock kernel config, the overlay's machinery API and the machine config
       // defaults all at once. preflight.yaml proves only the cheap half of that, so the PR is reviewed by hand
@@ -74,16 +60,9 @@
       description: "Talos minor and major: reviewed alone against docs/upgrade.md",
       matchDepNames: ["siderolabs/talos"],
       matchUpdateTypes: ["major", "minor"],
-      groupName: null, // out of the combined group above, or it would block that PR's automerge
+      groupName: null, // out of the combined group, or it would block that PR's automerge
       automerge: false,
       addLabels: ["needs-review"],
-    },
-    {
-      // Pin action refs to commit digests, so a moving tag cannot swap the action's code under us. The
-      // semver-comment helper above keeps a readable version beside each digest.
-      description: "pin github action refs to digests",
-      matchManagers: ["github-actions"],
-      pinDigests: true,
     },
   ],
 }
