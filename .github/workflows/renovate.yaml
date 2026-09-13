@@ -22,7 +22,7 @@ on:
 
 jobs:
   renovate:
-    uses: yama6a/gha/.github/workflows/renovate.yaml@v1
+    uses: yama6a/gha/.github/workflows/renovate.yaml@v2
     permissions:
       contents: read  # Renovate acts through RENOVATE_TOKEN, not GITHUB_TOKEN
     with:
