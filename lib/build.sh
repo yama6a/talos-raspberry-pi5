@@ -17,28 +17,28 @@ REGISTRY_USER="talos-rpi5"                 # path component in the local registr
 REGISTRY_NAME="talos-registry"             # registry container name
 # renovate: datasource=docker
 REGISTRY_IMAGE="registry:3"
-BUILDER_NAME="talos-bx"                    # standalone buildx builder; the one inside dockerd cannot do this build
-SRCSERVER_NAME="talos-srcserver"           # local HTTP server for the (non-byte-stable) kernel tarball
+BUILDER_NAME="talos-bx"          # standalone buildx builder; the one inside dockerd cannot do this build
+SRCSERVER_NAME="talos-srcserver" # local HTTP server for the (non-byte-stable) kernel tarball
 SRCSERVER_PORT="8099"
 # renovate: datasource=docker
 SRCSERVER_IMAGE="nginx:alpine"
 
 # ---- state ----
 # GMAKE, TALOS_MK, CHK, PKGS_PATCH_SKIP, SRCDIR, KSHA256, KSHA512 and BAKEINS come from preflight.sh.
-PKGS_TAG=""         # set by resolve_kernel_image_refs
+PKGS_TAG="" # set by resolve_kernel_image_refs
 KIMG=""
 KERNEL_CACHE_REF=""
-KVER=""             # set by filter_module_list, the kernel the build actually produced
-TALOS_TAG=""        # set by write_build_meta
+KVER=""      # set by filter_module_list, the kernel the build actually produced
+TALOS_TAG="" # set by write_build_meta
 SBCOVERLAY_TAG=""
 
 # ---- functions ----
 
 check_prerequisites() {
   say "checking prerequisites"
-  case "$(uname -m)" in arm64|aarch64) ;; *) warn "not arm64, the kernel build will be emulated and very slow" ;; esac
+  case "$(uname -m)" in arm64 | aarch64) ;; *) warn "not arm64, the kernel build will be emulated and very slow" ;; esac
   setup_gmake
-  docker info >/dev/null 2>&1 || die "docker not responding (start Docker Desktop / Rancher Desktop, or the docker service)"
+  docker info > /dev/null 2>&1 || die "docker not responding (start Docker Desktop / Rancher Desktop, or the docker service)"
   mkdir -p "$BUILD_DIR" "$OUT_DIR"
   echo "   build dir  ${BUILD_DIR}"
 }
@@ -49,27 +49,28 @@ start_local_registry() {
   say "local registry on ${REGISTRY_HOST}"
   # Filter in the daemon rather than `docker ps | grep -q`, which can SIGPIPE docker ps and, under pipefail,
   # read as "absent" and then fail on a name collision.
-  [ -n "$(docker ps -q -f "name=^${REGISTRY_NAME}$")" ] || \
-    docker run -d --restart=unless-stopped -p "127.0.0.1:${REGISTRY_PORT}:5000" --name "$REGISTRY_NAME" "$REGISTRY_IMAGE" >/dev/null
+  [ -n "$(docker ps -q -f "name=^${REGISTRY_NAME}$")" ] \
+    || docker run -d --restart=unless-stopped -p "127.0.0.1:${REGISTRY_PORT}:5000" --name "$REGISTRY_NAME" "$REGISTRY_IMAGE" > /dev/null
 }
 
 start_buildx_builder() {
   local cfg
   say "buildx builder ${BUILDER_NAME} (supports BuildKit merge)"
-  if ! docker buildx inspect "$BUILDER_NAME" >/dev/null 2>&1; then
-    cfg="$(mktemp)"; printf '[registry."%s"]\n  http = true\n  insecure = true\n' "$REGISTRY_HOST" > "$cfg"
+  if ! docker buildx inspect "$BUILDER_NAME" > /dev/null 2>&1; then
+    cfg="$(mktemp)"
+    printf '[registry."%s"]\n  http = true\n  insecure = true\n' "$REGISTRY_HOST" > "$cfg"
     docker buildx create --name "$BUILDER_NAME" --driver docker-container \
-      --driver-opt network=host --buildkitd-config "$cfg" >/dev/null
+      --driver-opt network=host --buildkitd-config "$cfg" > /dev/null
   fi
   docker buildx use "$BUILDER_NAME"
-  docker buildx inspect --bootstrap "$BUILDER_NAME" >/dev/null
+  docker buildx inspect --bootstrap "$BUILDER_NAME" > /dev/null
 }
 
 serve_kernel_source() {
-  docker rm -f "$SRCSERVER_NAME" >/dev/null 2>&1 || true
+  docker rm -f "$SRCSERVER_NAME" > /dev/null 2>&1 || true
   trap 'docker rm -f "$SRCSERVER_NAME" >/dev/null 2>&1 || true' EXIT
   docker run -d --name "$SRCSERVER_NAME" -p "127.0.0.1:${SRCSERVER_PORT}:80" \
-    -v "$SRCDIR:/usr/share/nginx/html:ro" "$SRCSERVER_IMAGE" >/dev/null
+    -v "$SRCDIR:/usr/share/nginx/html:ro" "$SRCSERVER_IMAGE" > /dev/null
 }
 
 # The pkgs checkout is already dirty from the rewrites above, and `--dirty` is a flag not a content hash, so
@@ -85,9 +86,9 @@ push_kernel_cache() {
   local token
   token="${GHCR_TOKEN:-${GITHUB_TOKEN:-}}"
   [ -n "$token" ] || return 0
-  if printf '%s' "$token" | docker login "$GHCR_SERVER" -u "${GHCR_USER:-${GITHUB_REPOSITORY%%/*}}" --password-stdin >/dev/null 2>&1; then
-    docker pull -q "$KIMG" >/dev/null 2>&1 && docker tag "$KIMG" "$KERNEL_CACHE_REF" \
-      && docker push -q "$KERNEL_CACHE_REF" >/dev/null 2>&1 \
+  if printf '%s' "$token" | docker login "$GHCR_SERVER" -u "${GHCR_USER:-${GITHUB_REPOSITORY%%/*}}" --password-stdin > /dev/null 2>&1; then
+    docker pull -q "$KIMG" > /dev/null 2>&1 && docker tag "$KIMG" "$KERNEL_CACHE_REF" \
+      && docker push -q "$KERNEL_CACHE_REF" > /dev/null 2>&1 \
       && echo "   cached as ${KERNEL_CACHE_REF}" \
       || warn "could not cache the kernel image; the next run will recompile"
   else
@@ -100,10 +101,10 @@ push_kernel_cache() {
 # KERNEL_KEY covers the pkgs commit, the linux commit, the config fragment and the patch-skip list and nothing
 # else, so editing this script or bumping the overlay does not throw the kernel away.
 build_or_reuse_kernel() {
-  if [ "${KERNEL_CACHE:-true}" = "true" ] && docker pull -q "$KERNEL_CACHE_REF" >/dev/null 2>&1; then
+  if [ "${KERNEL_CACHE:-true}" = "true" ] && docker pull -q "$KERNEL_CACHE_REF" > /dev/null 2>&1; then
     say "reusing the cached kernel ${KERNEL_CACHE_REF}, skipping the compile"
     docker tag "$KERNEL_CACHE_REF" "$KIMG"
-    docker push -q "$KIMG" >/dev/null || die "cannot push the cached kernel into the local registry"
+    docker push -q "$KIMG" > /dev/null || die "cannot push the cached kernel into the local registry"
   else
     say "build kernel (clang/ThinLTO, the long pole; verifies bake-ins early then compiles)"
     "$GMAKE" -f "$TALOS_MK" CHECKOUTS="$CHK" REGISTRY="$REGISTRY_HOST" REGISTRY_USERNAME="$REGISTRY_USER" kernel
@@ -119,7 +120,7 @@ prune_buildkit_cache_if_tight() {
   free_mb="$(df -Pm "$BUILD_DIR" | awk 'NR==2 {print $4}')"
   if [ "${PRUNE_BUILD_CACHE:-false}" = "true" ] && [ "${free_mb:-0}" -lt "${PRUNE_BELOW_MB:-40000}" ]; then
     say "only ${free_mb} MB free, pruning the BuildKit cache"
-    docker buildx prune -af >/dev/null 2>&1 || true
+    docker buildx prune -af > /dev/null 2>&1 || true
     df -Pm "$BUILD_DIR" | awk 'NR==2 {print "   now " $4 " MB free"}'
   else
     echo "   ${free_mb} MB free, keeping the BuildKit cache for a cheap retry"
@@ -131,8 +132,10 @@ prune_buildkit_cache_if_tight() {
 filter_module_list() {
   local cid mf
   say "REBASE 2, filter modules-arm64.txt to modules the kernel actually built"
-  docker pull -q "$KIMG" >/dev/null
-  cid="$(docker create "$KIMG" sh)"; docker export "$cid" 2>/dev/null | tar t 2>/dev/null > "$BUILD_DIR/kfiles.txt"; docker rm "$cid" >/dev/null
+  docker pull -q "$KIMG" > /dev/null
+  cid="$(docker create "$KIMG" sh)"
+  docker export "$cid" 2> /dev/null | tar t 2> /dev/null > "$BUILD_DIR/kfiles.txt"
+  docker rm "$cid" > /dev/null
   # One awk reading the FILE, not `grep ... | head -1`: that SIGPIPEs grep on a large listing and pipefail
   # kills the build. A STRING regex, not /.../: an unescaped slash inside [^/] would end a regex literal.
   KVER="$(awk 'match($0, "usr/lib/modules/[^/]+") { s=substr($0, RSTART, RLENGTH); sub(/.*\//, "", s); print s; exit }' "$BUILD_DIR/kfiles.txt")"
@@ -172,21 +175,21 @@ mirror_dockerfile_frontend() {
   upstream="$(dockerfile_frontend_ref)"
   local_ref="${REGISTRY_HOST}/${REGISTRY_USER}/dockerfile-frontend:$(printf '%s' "$upstream" | sha256hex | cut -c1-12)"
   say "mirror the Dockerfile frontend ${upstream} -> local registry"
-  if ! docker pull -q "$upstream" >/dev/null 2>&1; then
+  if ! docker pull -q "$upstream" > /dev/null 2>&1; then
     # Stale stored Docker Hub credentials are the usual cause and docker does not fall back on its own. The
     # image is public, so retry with the credentials stripped rather than making the user fix their keychain.
     warn "authenticated pull failed; retrying anonymously (your stored Docker Hub credentials look stale, 'docker login' would fix them)"
     anon_cfg="$(mktemp -d)"
     jq 'del(.credsStore) | del(.credHelpers) | .auths = {}' "${DOCKER_CONFIG:-${HOME}/.docker}/config.json" \
-      > "${anon_cfg}/config.json" 2>/dev/null || printf '{}' > "${anon_cfg}/config.json"
+      > "${anon_cfg}/config.json" 2> /dev/null || printf '{}' > "${anon_cfg}/config.json"
     for d in contexts cli-plugins; do
       [ -e "${DOCKER_CONFIG:-${HOME}/.docker}/$d" ] && ln -s "${DOCKER_CONFIG:-${HOME}/.docker}/$d" "${anon_cfg}/$d"
     done
-    DOCKER_CONFIG="$anon_cfg" docker pull -q "$upstream" >/dev/null \
+    DOCKER_CONFIG="$anon_cfg" docker pull -q "$upstream" > /dev/null \
       || die "cannot pull ${upstream} from Docker Hub, authenticated or anonymously (is Hub reachable?)"
   fi
   docker tag "$upstream" "$local_ref"
-  docker push -q "$local_ref" >/dev/null || die "cannot push ${local_ref} to the local registry"
+  docker push -q "$local_ref" > /dev/null || die "cannot push ${local_ref} to the local registry"
   perl -i -pe "s{^#\\s*syntax\\s*=.*}{# syntax = ${local_ref}}" "$dockerfile"
   keep_describe_clean Dockerfile
 }
@@ -211,7 +214,7 @@ build_installer_and_image() {
 write_build_meta() {
   TALOS_TAG="$(cd "$CHK/talos" && git describe --tag --always --dirty --match 'v[0-9]*')"
   SBCOVERLAY_TAG="$(cd "$CHK/sbc-raspberrypi5" && git describe --tag --always --dirty)-${PKGS_TAG}"
-cat > "$META_FILE" <<EOF
+  cat > "$META_FILE" << EOF
 KVER="${KVER}"
 PKGS_TAG="${PKGS_TAG}"
 TALOS_TAG="${TALOS_TAG}"

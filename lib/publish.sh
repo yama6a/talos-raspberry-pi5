@@ -9,10 +9,10 @@ source "${SCRIPT_DIR}/common.sh"
 # ---- state ----
 # GHCR_USER is deliberately NOT pre-declared: it may come from the environment, and an empty default here
 # would make the ${GHCR_USER:-...} fallback below always win.
-RELEASE_TAG=""    # set by resolve_build_revision
-CREATED=""        # set by stage_assets
+RELEASE_TAG="" # set by resolve_build_revision
+CREATED=""     # set by stage_assets
 REPO_URL=""
-DIGEST=""         # set by push_installer
+DIGEST="" # set by push_installer
 
 # ---- functions ----
 
@@ -34,16 +34,17 @@ resolve_build_revision() {
   say "resolving the build revision"
   [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
   releases="$(curl -fsSL --retry 3 ${auth[@]+"${auth[@]}"} \
-    "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" 2>/dev/null || true)"
+    "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" 2> /dev/null || true)"
   # All in jq: `... | grep | sort | tail` exits 1 when nothing matches, the NORMAL case for the first release
   # of a Talos version, and pipefail turns that into a silent build failure.
   existing="$(printf '%s' "$releases" | jq -r --arg t "$TALOS_VERSION" \
     '[.[]?.tag_name // empty | select(startswith($t + "-")) | ltrimstr($t + "-")
-      | select(test("^[0-9]+$")) | tonumber] | max // 0' 2>/dev/null || echo 0)"
+      | select(test("^[0-9]+$")) | tonumber] | max // 0' 2> /dev/null || echo 0)"
   [ -n "$existing" ] || existing=0
-  revision=$(( existing + 1 ))
+  revision=$((existing + 1))
   RELEASE_TAG="${TALOS_VERSION}-${revision}"
-  if [ "$existing" -eq 0 ]; then echo "   ${RELEASE_TAG}  (first release for ${TALOS_VERSION})"
+  if [ "$existing" -eq 0 ]; then
+    echo "   ${RELEASE_TAG}  (first release for ${TALOS_VERSION})"
   else echo "   ${RELEASE_TAG}  (previous: ${TALOS_VERSION}-${existing})"; fi
 }
 
@@ -105,22 +106,22 @@ stage_assets() {
   CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   REPO_URL="https://github.com/${GITHUB_REPOSITORY}"
   write_sbom
-  ( cd "$OUT_DIR" && sha256 ./*.raw.xz ./kernel-config-* ./build-inputs.json ./sbom.spdx.json > sha256sums.txt )
+  (cd "$OUT_DIR" && sha256 ./*.raw.xz ./kernel-config-* ./build-inputs.json ./sbom.spdx.json > sha256sums.txt)
 }
 
 push_installer() {
   local t
   say "pushing ${IMAGE_REPO}"
-  printf '%s' "$GHCR_TOKEN" | docker login "$GHCR_SERVER" -u "$GHCR_USER" --password-stdin >/dev/null \
+  printf '%s' "$GHCR_TOKEN" | docker login "$GHCR_SERVER" -u "$GHCR_USER" --password-stdin > /dev/null \
     || die "docker login ${GHCR_SERVER} failed (is the token write:packages for ${GHCR_USER}?)"
   # In CI the runner is thrown away, and the provenance attestation step needs the session to push the
   # attestation to the registry, so only a real machine logs out.
   [ -z "${GITHUB_ACTIONS:-}" ] && trap 'docker logout "$GHCR_SERVER" >/dev/null 2>&1 || true' EXIT
 
-  docker pull -q "$INSTALLER_IMG" >/dev/null || die "cannot pull ${INSTALLER_IMG} from the local registry"
+  docker pull -q "$INSTALLER_IMG" > /dev/null || die "cannot pull ${INSTALLER_IMG} from the local registry"
   for t in "$RELEASE_TAG" "$TALOS_VERSION" latest; do
     docker tag "$INSTALLER_IMG" "${IMAGE_REPO}:${t}"
-    docker push -q "${IMAGE_REPO}:${t}" >/dev/null || die "docker push ${IMAGE_REPO}:${t} failed"
+    docker push -q "${IMAGE_REPO}:${t}" > /dev/null || die "docker push ${IMAGE_REPO}:${t} failed"
     echo "   ${IMAGE_REPO}:${t}"
   done
   DIGEST="$(docker buildx imagetools inspect "${IMAGE_REPO}:${RELEASE_TAG}" --format '{{.Manifest.Digest}}')"
@@ -138,7 +139,7 @@ write_release_notes() {
   kernel_url="$(jq -r '.kernel_url' "$INPUTS_FILE")"
   overlay_short="${SBCOVERLAY_VERSION:0:12}"
   overlay_url="$(jq -r '.overlay_url' "$INPUTS_FILE")"
-cat > "${OUT_DIR}/release-notes.md" <<EOF
+  cat > "${OUT_DIR}/release-notes.md" << EOF
 Talos ${TALOS_VERSION} for the Raspberry Pi 5, on a raspberrypi/linux ${KVER} kernel.
 
 ## Install
@@ -175,7 +176,7 @@ EOF
 }
 
 write_release_env() {
-cat > "${OUT_DIR}/release.env" <<EOF
+  cat > "${OUT_DIR}/release.env" << EOF
 RELEASE_TAG="${RELEASE_TAG}"
 IMAGE_DIGEST="${DIGEST}"
 IMAGE_REF="${IMAGE_REPO}:${RELEASE_TAG}"

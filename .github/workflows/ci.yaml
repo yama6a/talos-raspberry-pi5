@@ -19,19 +19,14 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # -e SC2034 is "X appears unused", which fires on common.sh's shared constants. They ARE used,
-      # by the scripts that source it, but shellcheck reads one file at a time so it never sees the use.
-      - uses: yama6a/gha/.github/actions/shellcheck@v1
-        with:
-          glob: lib/*.sh
-          exclude: SC2034
+      - uses: yama6a/gha/.github/actions/shell-checks@v2
 
   yaml:
     name: yaml
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: yama6a/gha/.github/actions/yaml-checks@v1
+      - uses: yama6a/gha/.github/actions/yaml-checks@v2
 
   main-is-green:
     name: main-is-green
@@ -67,6 +62,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # A broken config silently halts ALL dependency updates.
-      - uses: yama6a/gha/.github/actions/validate-renovate-config@v1
+      - uses: yama6a/gha/.github/actions/validate-renovate-config@v2
         with:
           config-file: renovate.json5

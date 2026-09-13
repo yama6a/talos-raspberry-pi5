@@ -10,11 +10,11 @@ source "${SCRIPT_DIR}/common.sh"
 load_staged_release() {
   [ -f "${OUT_DIR}/release.env" ] || die "missing ${OUT_DIR}/release.env, run: make publish"
   # shellcheck disable=SC1090
-  source "${OUT_DIR}/release.env"   # publish.sh writes RELEASE_TAG, IMAGE_DIGEST, IMAGE_REF
+  source "${OUT_DIR}/release.env" # publish.sh writes RELEASE_TAG, IMAGE_DIGEST, IMAGE_REF
 }
 
 assert_release_absent() {
-  if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+  if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
     die "release ${RELEASE_TAG} already exists; publish.sh should have picked the next revision"
   fi
 }
