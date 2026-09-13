@@ -8,12 +8,12 @@ source "${SCRIPT_DIR}/common.sh"
 
 # ---- knobs ----
 # renovate: datasource=docker
-ALPINE_IMAGE="alpine:3.24"     # macOS cannot loop-mount Linux filesystems, so the checks run in here
-MIN_BYTES=50000000             # a plausible compressed image is between these two
+ALPINE_IMAGE="alpine:3.24" # macOS cannot loop-mount Linux filesystems, so the checks run in here
+MIN_BYTES=50000000         # a plausible compressed image is between these two
 MAX_BYTES=600000000
 
 # ---- state ----
-UKI_DIR=""   # set by extract_uki, read by check_kernel_and_extensions
+UKI_DIR="" # set by extract_uki, read by check_kernel_and_extensions
 
 # ---- functions ----
 
@@ -23,22 +23,24 @@ assert_image_built() {
 
 # The installer's boot binary is a UKI: one EFI file holding the kernel, initrd and cmdline together.
 extract_uki() {
-  UKI_DIR="$BUILD_DIR/uki"; rm -rf "$UKI_DIR"; mkdir -p "$UKI_DIR"
-  if ! docker pull -q "$INSTALLER_IMG" >/dev/null 2>&1; then
+  UKI_DIR="$BUILD_DIR/uki"
+  rm -rf "$UKI_DIR"
+  mkdir -p "$UKI_DIR"
+  if ! docker pull -q "$INSTALLER_IMG" > /dev/null 2>&1; then
     bad "cannot pull ${INSTALLER_IMG} (is the local registry container still running?)"
     return 1
   fi
   local cid
   cid="$(docker create "$INSTALLER_IMG" sh)"
-  docker cp "$cid:/usr/install/arm64/vmlinuz.efi" "$UKI_DIR/vmlinuz.efi" >/dev/null 2>&1
-  docker rm "$cid" >/dev/null
-  chmod 644 "$UKI_DIR/vmlinuz.efi" 2>/dev/null
+  docker cp "$cid:/usr/install/arm64/vmlinuz.efi" "$UKI_DIR/vmlinuz.efi" > /dev/null 2>&1
+  docker rm "$cid" > /dev/null
+  chmod 644 "$UKI_DIR/vmlinuz.efi" 2> /dev/null
   return 0
 }
 
 check_raw_image() {
   if docker run --rm --privileged -e IMAGE_NAME="$IMAGE_NAME" -e MIN="$MIN_BYTES" -e MAX="$MAX_BYTES" \
-       -v "$OUT_DIR:/work" -v /dev:/dev "$ALPINE_IMAGE" sh -c '
+    -v "$OUT_DIR:/work" -v /dev:/dev "$ALPINE_IMAGE" sh -c '
   set -e; apk add -q util-linux xz >/dev/null 2>&1; cd /work; F="$IMAGE_NAME"; RAW="${IMAGE_NAME%.xz}"
   fail=0
   xz -t "$F" && echo "  integrity (xz -t)" || { echo "  FAILED integrity"; fail=1; }
@@ -53,8 +55,10 @@ check_raw_image() {
     && echo "  config.txt disables wifi+bt" || { echo "  FAILED config.txt overlays"; fail=1; }
   umount /e; losetup -d "$LOOP"; rm -f "$RAW"
   exit $fail
-'; then ok "raw image: integrity, size, partition layout, Pi 5 boot bits"
-  else bad "raw image validation failed (see above)"
+'; then
+    ok "raw image: integrity, size, partition layout, Pi 5 boot bits"
+  else
+    bad "raw image validation failed (see above)"
   fi
 }
 
@@ -80,8 +84,10 @@ PY
   ext=$( (zstd -dc /tmp/.initrd 2>/dev/null; xz -dc /tmp/.initrd 2>/dev/null) | strings | grep -ioE "iscsi-tools|util-linux-tools" | sort -u )
   echo "$ext" | grep -qx iscsi-tools && echo "  extension iscsi-tools" || { echo "  FAILED iscsi-tools not baked in"; exit 1; }
   echo "$ext" | grep -qx util-linux-tools && echo "  extension util-linux-tools" || { echo "  FAILED util-linux-tools not baked in"; exit 1; }
-'; then ok "installer: kernel label matches the built kernel, both extensions baked in"
-  else bad "installer/kernel validation failed (see above)"
+'; then
+    ok "installer: kernel label matches the built kernel, both extensions baked in"
+  else
+    bad "installer/kernel validation failed (see above)"
   fi
 }
 

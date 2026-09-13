@@ -17,14 +17,14 @@ _PREFLIGHT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_PREFLIGHT_DIR}/common.sh"
 
 # ---- state shared with build.sh ----
-GMAKE=""            # set by setup_gmake
-TALOS_MK=""         # set by derive_paths, after load_inputs supplies BUILD_DIR
+GMAKE=""    # set by setup_gmake
+TALOS_MK="" # set by derive_paths, after load_inputs supplies BUILD_DIR
 CHK=""
 PKGS_PATCH_SKIP=""
-SRCDIR=""           # set by fetch_kernel_source
+SRCDIR="" # set by fetch_kernel_source
 KSHA256=""
 KSHA512=""
-BAKEINS=""          # set by stage_kernel_config
+BAKEINS="" # set by stage_kernel_config
 
 derive_paths() {
   TALOS_MK="${REPO_ROOT}/build/Makefile.talos"
@@ -59,7 +59,9 @@ assert_patch_skips_exist() {
   local slugs slug f s
   slugs="$(for f in "$CHK/pkgs/kernel/build/patches"/*.patch; do
     [ -e "$f" ] || continue
-    s="$(basename "$f" .patch)"; case "$s" in [0-9]*-*) s="${s#*-}" ;; esac; printf '%s\n' "$s"
+    s="$(basename "$f" .patch)"
+    case "$s" in [0-9]*-*) s="${s#*-}" ;; esac
+    printf '%s\n' "$s"
   done)"
   while read -r slug; do
     [ -n "$slug" ] || continue
@@ -76,7 +78,8 @@ ${slugs}"
 # right one, and the version check below still runs on it.
 fetch_kernel_source() {
   local srcver
-  SRCDIR="${BUILD_DIR}/srcserve"; mkdir -p "$SRCDIR"
+  SRCDIR="${BUILD_DIR}/srcserve"
+  mkdir -p "$SRCDIR"
   if [ -s "$SRCDIR/linux.tar.gz" ]; then
     echo "   reusing the cached kernel tarball"
   else
@@ -85,7 +88,7 @@ fetch_kernel_source() {
     mv "${SRCDIR}/linux.tar.gz.part" "$SRCDIR/linux.tar.gz"
   fi
   # Guards a resolver bug: the fetched tree's own Makefile version MUST be what Talos expects.
-  srcver="$(tar -xzOf "$SRCDIR/linux.tar.gz" "linux-${KERNEL_COMMIT}/Makefile" 2>/dev/null \
+  srcver="$(tar -xzOf "$SRCDIR/linux.tar.gz" "linux-${KERNEL_COMMIT}/Makefile" 2> /dev/null \
     | awk -F' *= *' '/^VERSION/{v=$2} /^PATCHLEVEL/{p=$2} /^SUBLEVEL/{s=$2} END{print v"."p"."s}')"
   [ "$srcver" = "$KERNEL_VERSION" ] || die "the tarball at ${KERNEL_COMMIT} is linux ${srcver:-unknown}, expected ${KERNEL_VERSION} (Talos ${TALOS_VERSION}), so this is probably a resolver bug"
   KSHA256="$(sha256hex "$SRCDIR/linux.tar.gz")"
@@ -114,7 +117,7 @@ stage_kernel_config() {
 # collide. Gate each on a dry-run: apply what applies, skip only what patch-skip.txt names, fail on anything
 # else, so a pkgs bump that adds a patch we cannot apply stops the build instead of dropping a fix.
 gate_kernel_patches() {
-python3 - "$CHK/pkgs/kernel/build/pkg.yaml" "$(printf '%s' "$PKGS_PATCH_SKIP" | tr '\n' ' ')" <<'PY'
+  python3 - "$CHK/pkgs/kernel/build/pkg.yaml" "$(printf '%s' "$PKGS_PATCH_SKIP" | tr '\n' ' ')" << 'PY'
 import sys
 p,skip=sys.argv[1],sys.argv[2].strip()
 s=open(p).read()
@@ -144,7 +147,7 @@ PY
 # Merge the fragment, reconcile with olddefconfig, then verify every bake-in before compiling, so an unmet
 # dependency fails in seconds rather than after a 40-minute build.
 inject_config_merge() {
-python3 - "$CHK/pkgs/kernel/build/pkg.yaml" "$BAKEINS" <<'PY'
+  python3 - "$CHK/pkgs/kernel/build/pkg.yaml" "$BAKEINS" << 'PY'
 import sys
 p,bakeins=sys.argv[1],sys.argv[2].split()
 s=open(p).read()
@@ -180,12 +183,12 @@ dockerfile_frontend_ref() {
 port_overlay_to_machinery() {
   local osrc="$CHK/sbc-raspberrypi5/installers/rpi5/src"
   say "REBASE 3, port sbc-raspberrypi5 overlay to machinery ${MACHINERY_VERSION}"
-  ( cd "$osrc" && GOWORK=off GOFLAGS=-mod=mod go get "github.com/siderolabs/talos/pkg/machinery@${MACHINERY_VERSION}" && GOWORK=off go mod tidy )
+  (cd "$osrc" && GOWORK=off GOFLAGS=-mod=mod go get "github.com/siderolabs/talos/pkg/machinery@${MACHINERY_VERSION}" && GOWORK=off go mod tidy)
   perl -i -pe 's/adapter\.Execute\(&RpiInstaller\{\}\)/adapter.Execute(context.Background(), &RpiInstaller{})/' "$osrc/main.go"
   perl -i -pe 's/func \(i \*RpiInstaller\) GetOptions\(extra/func (i *RpiInstaller) GetOptions(_ context.Context, extra/' "$osrc/main.go"
   perl -i -pe 's/func \(i \*RpiInstaller\) Install\(options/func (i *RpiInstaller) Install(_ context.Context, options/' "$osrc/main.go"
   grep -q '"context"' "$osrc/main.go" || perl -0pi -e 's/(import \(\n)/$1\t"context"\n/' "$osrc/main.go"
-  ( cd "$osrc" && GOWORK=off CGO_ENABLED=0 go build -o /dev/null . ) || die "overlay does not compile against ${MACHINERY_VERSION}"
+  (cd "$osrc" && GOWORK=off CGO_ENABLED=0 go build -o /dev/null .) || die "overlay does not compile against ${MACHINERY_VERSION}"
 }
 
 preflight_print_result() {
@@ -221,7 +224,7 @@ preflight_main() {
   gate_kernel_patches
   inject_config_merge
   echo "   kernel/build/pkg.yaml took both rewrites"
-  dockerfile_frontend_ref >/dev/null && echo "   talos Dockerfile still declares a '# syntax =' frontend"
+  dockerfile_frontend_ref > /dev/null && echo "   talos Dockerfile still declares a '# syntax =' frontend"
 
   port_overlay_to_machinery
 

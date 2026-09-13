@@ -9,20 +9,20 @@ source "${SCRIPT_DIR}/common.sh"
 # ---- knobs ----
 RAW="https://raw.githubusercontent.com"
 API="https://api.github.com"
-FW_CHANNELS="master stable next oldstable"  # raspberrypi/firmware refs to try first; master is its current kernel
-FW_HISTORY_PAGE=100                         # failsafe: how far back to walk master's extra/git_hash history
+FW_CHANNELS="master stable next oldstable" # raspberrypi/firmware refs to try first; master is its current kernel
+FW_HISTORY_PAGE=100                        # failsafe: how far back to walk master's extra/git_hash history
 # Only files that can change what gets built, so editing one cuts a new build revision. Docs, workflows and
 # the renovate config are excluded because they cannot.
 RECIPE_FILES="lib/build.sh lib/preflight.sh build/Makefile.talos kernel/pi5-rpi.fragment kernel/patch-skip.txt"
 
 # ---- state ----
-AUTH=()             # set by use_github_token, read by get
-PKGS_DESC=""        # set by resolve_pkgs
+AUTH=()      # set by use_github_token, read by get
+PKGS_DESC="" # set by resolve_pkgs
 PKGS_REF=""
-KERNEL_VERSION=""   # set by resolve_kernel_version
-KERNEL_COMMIT=""    # set by resolve_kernel_commit
+KERNEL_VERSION="" # set by resolve_kernel_version
+KERNEL_COMMIT=""  # set by resolve_kernel_commit
 KERNEL_SOURCE=""
-BUILD_KEY=""        # set by compute_keys
+BUILD_KEY="" # set by compute_keys
 RECIPE_HASH=""
 FINGERPRINT=""
 KERNEL_KEY=""
@@ -65,9 +65,9 @@ resolve_kernel_version() {
 # firmware_kernel <firmware-ref> -> "<linux-commit><TAB><version>", non-zero if that ref has no usable hash.
 firmware_kernel() {
   local h mk
-  h="$(get "${RAW}/raspberrypi/firmware/$1/extra/git_hash" 2>/dev/null | tr -d '[:space:]')" || return 1
+  h="$(get "${RAW}/raspberrypi/firmware/$1/extra/git_hash" 2> /dev/null | tr -d '[:space:]')" || return 1
   [[ "$h" =~ ^[0-9a-f]{40}$ ]] || return 1
-  mk="$(get "${RAW}/raspberrypi/linux/$h/Makefile" 2>/dev/null)" || return 1
+  mk="$(get "${RAW}/raspberrypi/linux/$h/Makefile" 2> /dev/null)" || return 1
   printf '%s\t%s' "$h" "$(printf '%s\n' "$mk" \
     | awk -F' *= *' '/^VERSION/{v=$2}/^PATCHLEVEL/{p=$2}/^SUBLEVEL/{s=$2} END{print v"."p"."s}')"
 }
@@ -79,7 +79,9 @@ scan_firmware_channels() {
   for b in $FW_CHANNELS; do
     o="$(firmware_kernel "$b" || true)"
     if [ -n "$o" ] && [ "${o##*$'\t'}" = "$KERNEL_VERSION" ]; then
-      KERNEL_COMMIT="${o%%$'\t'*}"; KERNEL_SOURCE="firmware/${b}"; return 0
+      KERNEL_COMMIT="${o%%$'\t'*}"
+      KERNEL_SOURCE="firmware/${b}"
+      return 0
     fi
   done
   return 1
@@ -89,11 +91,13 @@ scan_firmware_channels() {
 walk_firmware_history() {
   local hist c o
   warn "no firmware channel HEAD carries ${KERNEL_VERSION}; walking master's extra/git_hash history"
-  hist="$(get "${API}/repos/raspberrypi/firmware/commits?path=extra/git_hash&sha=master&per_page=${FW_HISTORY_PAGE}" 2>/dev/null || true)"
-  for c in $(printf '%s' "$hist" | jq -r '.[].sha' 2>/dev/null); do
+  hist="$(get "${API}/repos/raspberrypi/firmware/commits?path=extra/git_hash&sha=master&per_page=${FW_HISTORY_PAGE}" 2> /dev/null || true)"
+  for c in $(printf '%s' "$hist" | jq -r '.[].sha' 2> /dev/null); do
     o="$(firmware_kernel "$c" || true)"
     if [ -n "$o" ] && [ "${o##*$'\t'}" = "$KERNEL_VERSION" ]; then
-      KERNEL_COMMIT="${o%%$'\t'*}"; KERNEL_SOURCE="firmware master@${c:0:10}"; return 0
+      KERNEL_COMMIT="${o%%$'\t'*}"
+      KERNEL_SOURCE="firmware master@${c:0:10}"
+      return 0
     fi
   done
   return 1
