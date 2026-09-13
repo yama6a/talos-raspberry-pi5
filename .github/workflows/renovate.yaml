@@ -1,0 +1,32 @@
+# Self-hosted Renovate. Reads /renovate.json5 from the cloned repo automatically.
+name: Renovate
+
+on:
+  schedule:
+    # Two runs a night, 30 min apart: the first opens PRs, the second merges the ones whose CI went green.
+    # Renovate never merges on the run that opened a PR, so a single nightly run would add a day of lag.
+    # A merged bump lands on main, which is what triggers the image build.
+    - cron: "13 5 * * *"
+    - cron: "43 5 * * *"
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: Renovate log level
+        default: info
+        type: choice
+        options: [info, debug]
+      dryRun:
+        description: Dry run (extract + plan, open no PRs)
+        default: false
+        type: boolean
+
+jobs:
+  renovate:
+    uses: yama6a/gha/.github/workflows/renovate.yaml@v1
+    permissions:
+      contents: read  # Renovate acts through RENOVATE_TOKEN, not GITHUB_TOKEN
+    with:
+      log-level: ${{ inputs.logLevel || 'info' }}
+      dry-run: ${{ inputs.dryRun || false }}
+    secrets:
+      RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}

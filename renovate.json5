@@ -1,0 +1,68 @@
+{
+  // Opens dependency-update PRs for every pin here. Which manager owns what:
+  //   github-actions  the workflows' action pins
+  //   customManagers  versions.env's Talos/overlay/extension recipe, and the helper images in lib/*.sh
+  // Cadence is the cron in .github/workflows/renovate.yaml, not an internal `schedule`, so a manual
+  // workflow_dispatch works too.
+  //
+  // The shared preset carries the grouping, automerge and digest-pinning rules. Only what is specific
+  // to this repo lives below.
+  // A merged bump pushes to main, and .github/workflows/build.yaml watches versions.env, so the image
+  // rebuilds itself. It is fingerprint-guarded, so a bump that changes nothing resolvable builds nothing.
+  // CI cannot prove the image still builds (no build on PRs), so a bad bump surfaces as a red build
+  // workflow on main, not as a broken release.
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["github>yama6a/gha:default.json5"],
+
+  prConcurrentLimit: 6,
+
+  customManagers: [
+    {
+      // Images annotated `# renovate: datasource=docker` in shell scripts, which no built-in manager reads.
+      // Captures repo:tag(+digest) from the ref itself, so tag AND digest stay fresh.
+      customType: "regex",
+      description: "docker image refs (annotated) in versions.env and lib/*.sh",
+      managerFilePatterns: ["/^versions\\.env$/", "/^lib/.*\\.sh$/"],
+      matchStrings: [
+        "# renovate: datasource=docker(?: versioning=(?<versioning>\\S+))?\\s+[^\\n]*?(?<depName>[a-z0-9][a-z0-9._/-]+):(?<currentValue>[\\w][\\w.-]*)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?",
+      ],
+      datasourceTemplate: "docker",
+    },
+    {
+      // Scalar vars in versions.env carrying a full `# renovate:` annotation. SBCOVERLAY is separate, below.
+      customType: "regex",
+      description: "annotated version scalars in versions.env",
+      managerFilePatterns: ["/^versions\\.env$/"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+\\w+=\"(?<currentValue>[^\"]+)\"",
+      ],
+    },
+    {
+      // Pinned to a bare commit SHA because the repo has no tags; the build clones it and checks this out.
+      // Track main's HEAD via git-refs so the SHA stays fresh.
+      customType: "regex",
+      description: "sbc-raspberrypi5 overlay commit pin",
+      managerFilePatterns: ["/^versions\\.env$/"],
+      matchStrings: ["SBCOVERLAY_VERSION=\"(?<currentDigest>[a-f0-9]{40})\""],
+      currentValueTemplate: "main",
+      depNameTemplate: "talos-rpi5/sbc-raspberrypi5",
+      packageNameTemplate: "https://github.com/talos-rpi5/sbc-raspberrypi5",
+      datasourceTemplate: "git-refs",
+    },
+  ],
+
+  packageRules: [
+    {
+      // A Talos MAJOR or MINOR is never a digest swap: it can move the expected kernel version, the pkgs
+      // commit and its patch set, the stock kernel config, the overlay's machinery API and the machine config
+      // defaults all at once. preflight.yaml proves only the cheap half of that, so the PR is reviewed by hand
+      // against docs/upgrade.md, never automerged.
+      description: "Talos minor and major: reviewed alone against docs/upgrade.md",
+      matchDepNames: ["siderolabs/talos"],
+      matchUpdateTypes: ["major", "minor"],
+      groupName: null, // out of the combined group, or it would block that PR's automerge
+      automerge: false,
+      addLabels: ["needs-review"],
+    },
+  ],
+}

@@ -1,0 +1,5 @@
+# Build scratch + output: upstream checkouts, the kernel source tarball, the staged image. Keyed by the
+# resolved build inputs, so a version bump lands in a fresh .cache/<key>/. Tens of GB per key.
+/.cache/
+
+.DS_Store

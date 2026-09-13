@@ -1,0 +1,94 @@
+# Drives the three upstream build systems (siderolabs/pkgs, siderolabs/talos, talos-rpi5/sbc-raspberrypi5),
+# each of which has its own Makefile. Adapted from talos-rpi5/talos-builder (MIT), with the Pi 5 choices
+# baked in rather than patched over at runtime.
+# Needs GNU make >= 4; lib/build.sh finds one and invokes this. Every variable below is passed in.
+
+REGISTRY ?= localhost:5010
+REGISTRY_USERNAME ?= talos-rpi5
+CHECKOUTS ?= $(CURDIR)/checkouts
+EXTENSIONS ?=
+
+# No defaults: these come from versions.env and the resolver, via lib/build.sh.
+TALOS_VERSION ?=
+PKGS_REF ?=
+SBCOVERLAY_VERSION ?=
+
+PKGS_REPOSITORY = https://github.com/siderolabs/pkgs.git
+TALOS_REPOSITORY = https://github.com/siderolabs/talos.git
+SBCOVERLAY_REPOSITORY = https://github.com/talos-rpi5/sbc-raspberrypi5.git
+
+# Resolved from the checkouts, not passed in: these strings tag the built images and must be exactly what the
+# upstream Makefiles would compute for themselves.
+PKGS_TAG = $(shell cd $(CHECKOUTS)/pkgs && git describe --tag --always --dirty --match 'v[0-9]*')
+TALOS_TAG = $(shell cd $(CHECKOUTS)/talos && git describe --tag --always --dirty --match 'v[0-9]*')
+SBCOVERLAY_TAG = $(shell cd $(CHECKOUTS)/sbc-raspberrypi5 && git describe --tag --always --dirty)-$(PKGS_TAG)
+
+# One flag per extension. The upstream builder passes a single --system-extension-image, which silently bakes
+# only the first when you want two.
+EXTENSION_FLAGS = $(foreach e,$(EXTENSIONS),--system-extension-image=$(e))
+
+.PHONY: checkouts
+# Always a fresh clone: the build mutates these trees (kernel source swap, module list filter, overlay port),
+# so reusing one would double-apply. pkgs and the overlay are cloned in full because `git describe` needs the
+# tag history; talos is pinned to a tag, so one commit is enough.
+checkouts:
+	@test -n "$(TALOS_VERSION)" -a -n "$(PKGS_REF)" -a -n "$(SBCOVERLAY_VERSION)" \
+		|| { echo "TALOS_VERSION, PKGS_REF and SBCOVERLAY_VERSION must all be passed in"; exit 1; }
+	@# Retried: on macOS, Finder can drop a fresh .DS_Store into a directory rm is still walking, so the
+	@# rmdir fails with "Directory not empty" even though everything rm listed is gone.
+	@for d in pkgs talos sbc-raspberrypi5; do \
+		for i in 1 2 3; do \
+			rm -rf "$(CHECKOUTS)/$$d" && break; \
+			[ $$i = 3 ] && { echo "cannot remove $(CHECKOUTS)/$$d"; exit 1; }; \
+		done; \
+	done
+	mkdir -p "$(CHECKOUTS)"
+	git clone -q "$(PKGS_REPOSITORY)" "$(CHECKOUTS)/pkgs"
+	cd "$(CHECKOUTS)/pkgs" && { git checkout -q "$(PKGS_REF)" 2>/dev/null \
+		|| { git fetch -q origin "$(PKGS_REF)" && git checkout -q FETCH_HEAD; }; }
+	git clone -q -c advice.detachedHead=false --depth 1 --branch "$(TALOS_VERSION)" "$(TALOS_REPOSITORY)" "$(CHECKOUTS)/talos"
+	git clone -q "$(SBCOVERLAY_REPOSITORY)" "$(CHECKOUTS)/sbc-raspberrypi5"
+	cd "$(CHECKOUTS)/sbc-raspberrypi5" && git checkout -q "$(SBCOVERLAY_VERSION)"
+
+.PHONY: kernel
+kernel:
+	cd "$(CHECKOUTS)/pkgs" && \
+		$(MAKE) REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) PUSH=true \
+			PLATFORM=linux/arm64 \
+			kernel
+
+.PHONY: overlay
+overlay:
+	cd "$(CHECKOUTS)/sbc-raspberrypi5" && \
+		$(MAKE) REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) IMAGE_TAG=$(SBCOVERLAY_TAG) PUSH=true \
+			PKGS_PREFIX=$(REGISTRY)/$(REGISTRY_USERNAME) PKGS=$(PKGS_TAG) \
+			INSTALLER_ARCH=arm64 PLATFORM=linux/arm64 \
+			sbc-raspberrypi5
+
+.PHONY: installer
+# Two steps: build the installer image, then run the imager to turn it into a raw disk image.
+# The imager runs the `rpi5` profile the overlay provides, NOT Talos's `metal` default. `metal` boots via
+# sd-boot, whose image path skips the overlay installer entirely, so a Pi 5 image built as `metal` gets the
+# kernel but none of the u-boot/config.txt/dtb it needs to boot.
+# --network host so the imager can pull the just-built layers from the local registry on loopback.
+installer:
+	cd "$(CHECKOUTS)/talos" && \
+		$(MAKE) REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) PUSH=true \
+			PKG_KERNEL=$(REGISTRY)/$(REGISTRY_USERNAME)/kernel:$(PKGS_TAG) \
+			INSTALLER_ARCH=arm64 PLATFORM=linux/arm64 \
+			IMAGER_ARGS="--overlay-name=rpi5 --overlay-image=$(REGISTRY)/$(REGISTRY_USERNAME)/sbc-raspberrypi5:$(SBCOVERLAY_TAG) $(EXTENSION_FLAGS)" \
+			kernel initramfs imager installer-base installer && \
+		docker run --rm -t --network host -v ./_out:/out -v /dev:/dev --privileged \
+			$(REGISTRY)/$(REGISTRY_USERNAME)/imager:$(TALOS_TAG) \
+			rpi5 --arch arm64 \
+			--base-installer-image="$(REGISTRY)/$(REGISTRY_USERNAME)/installer:$(TALOS_TAG)" \
+			--overlay-name="rpi5" \
+			--overlay-image="$(REGISTRY)/$(REGISTRY_USERNAME)/sbc-raspberrypi5:$(SBCOVERLAY_TAG)" \
+			$(EXTENSION_FLAGS)
+
+.PHONY: print-tags
+# lib/build.sh reads these back after the checkouts exist.
+print-tags:
+	@echo "PKGS_TAG=$(PKGS_TAG)"
+	@echo "TALOS_TAG=$(TALOS_TAG)"
+	@echo "SBCOVERLAY_TAG=$(SBCOVERLAY_TAG)"
