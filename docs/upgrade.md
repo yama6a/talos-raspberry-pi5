@@ -57,9 +57,10 @@ image reaching a node costs a reflash and an etcd member removal, see [upstream.
    make resolve
    ```
 
-   Expected: a `linux` line naming a commit, `via firmware/master` or another channel. A `die` here means
-   Raspberry Pi has not shipped that patch level. Wait, or hold the bump. Do not pin a nearby kernel, see
-   [kernel.md](kernel.md).
+   Expected: a `linux` line naming a commit, `via firmware/master` or another channel, or
+   `via linux rpi-X.Y.y@<sha>, no firmware release` when Raspberry Pi skipped that patch level in firmware
+   but the fork merged it. A `die` here means the fork has not merged it. Wait, or hold the bump. Do not pin
+   a nearby kernel, see [kernel.md](kernel.md).
 
 3. Diff the pkgs patch set against the last release.
 
@@ -220,6 +221,21 @@ For 1.14 specifically:
 | `/var` mount flags | `nosuid,nodev` | same. `noexec` on `/var` shipped in the 1.14 alphas and was dropped before the release (`6fa811a0d`); only STATE, ETCD and LOG are `noexec` |
 | `talosctl apply-config --mode=reboot` | gone, applies without a reboot by default | same |
 | Longhorn pod security | `enforce: privileged` on its namespace, as before | same |
+
+## The 1.14.0 to 1.14.1 record
+
+Checked on 2026-09-17, against `v1.14.1` and pkgs `v1.14.0-25-gf694e1b`.
+
+| Item | Result |
+|---|---|
+| why 1.14.0 never shipped | the 1.14.0 imager staged the overlay's EFI assets under the BOOT source dir, so `config.txt`, `u-boot.bin`, the DTB and the overlays were missing from the EFI partition and `make validate` failed. Fixed upstream in `09681e8` (siderolabs/talos#14226), in 1.14.1 |
+| kernel | 6.18.48 to 6.18.51. No firmware ref: `raspberrypi/firmware` master went 6.18.50 to 6.18.52. Resolved through the fork branch to `457be933`, stable 6.18.51 plus six Pi commits, all of which are also in the 6.18.52 firmware |
+| pkgs patches | one added, `security-lockdown-lock-down-the-kernel-in-EFI-Secure-`, applies cleanly |
+| existing skip entries | both macb capability bits and `tx_pending` still in the fork at 6.18.51 |
+| stock config | no fragment symbol moved |
+| overlay, imager, installer | machinery API, make targets and imager flags unchanged |
+| extensions | same digests as 1.14.0 |
+| not verified | the kernel compiles, the imager runs, a board boots |
 
 ## The 1.13.9 to 1.14.0 record
 
