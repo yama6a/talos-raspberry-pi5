@@ -38,6 +38,11 @@ the two match by construction.
    `oldstable`) are tried first, and `master` usually matches.
 3. Failing that, walk `master`'s `extra/git_hash` history, which is a dense index of every recent kernel,
    newest first.
+4. Failing that too, walk `raspberrypi/linux` itself: the first-parent history of `rpi-X.Y.y`, newest first,
+   until a commit's `Makefile` says the version. Raspberry Pi cuts firmware about weekly and skips whichever
+   stable releases fall between cuts, so about half the odd patch levels never get a firmware ref. The fork
+   still merges every one, and the commit picked is its last state at that version before the next merge.
+   `build-inputs.json` records this as `kernel_source: linux rpi-X.Y.y@<sha>, no firmware release`.
 
 The build then re-checks the downloaded tarball's own `Makefile` version, and validation re-checks the
 compiled kernel against the UKI label at the end. Three independent checks, because a mislabeled image is
@@ -45,8 +50,8 @@ the kind of thing nobody notices for months.
 
 ## If kernel resolution fails
 
-`make resolve` found no firmware ref carrying the version Talos wants. That means either a very old Talos is
-being rebuilt, or Raspberry Pi skipped that patch level. Inspect by hand:
+`make resolve` found no firmware ref and no `rpi-X.Y.y` commit carrying the version Talos wants. That means
+either a very old Talos is being rebuilt, or the fork has not merged that stable release yet. Inspect by hand:
 
 ```
 for b in master stable next oldstable; do
@@ -58,10 +63,14 @@ done
 
 # older versions: the linux commit is the git_hash at each historical master commit that changed it
 gh api "repos/raspberrypi/firmware/commits?path=extra/git_hash&sha=master" --jq '.[].sha'
+
+# no firmware ref at all: the stable merges on the fork branch, newest first
+gh api "repos/raspberrypi/linux/commits?sha=rpi-6.18.y&per_page=100" \
+  --jq '.[] | select(.parents | length > 1) | "\(.sha) \(.commit.message | split("\n")[0])"'
 ```
 
-Then either wait for a firmware channel to ship that version, or move `TALOS_VERSION` to a release whose
-expected kernel does exist. Do not pin a nearby kernel: that is exactly the mislabeling above.
+Then either wait for the fork to merge that version, or move `TALOS_VERSION` to a release whose expected
+kernel does exist. Do not pin a nearby kernel: that is exactly the mislabeling above.
 
 ## siderolabs/pkgs
 

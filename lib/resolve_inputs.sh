@@ -11,6 +11,8 @@ RAW="https://raw.githubusercontent.com"
 API="https://api.github.com"
 FW_CHANNELS="master stable next oldstable" # raspberrypi/firmware refs to try first; master is its current kernel
 FW_HISTORY_PAGE=100                        # failsafe: how far back to walk master's extra/git_hash history
+LINUX_WALK_MAX=200                         # last resort: how many first-parent commits of rpi-X.Y.y to inspect
+LINUX_WALK_PAGES=10                        # commit-list pages (100 each) fetched to reconstruct that chain
 # Only files that can change what gets built, so editing one cuts a new build revision. Docs, workflows and
 # the renovate config are excluded because they cannot.
 RECIPE_FILES="lib/build.sh lib/preflight.sh build/Makefile.talos kernel/pi5-rpi.fragment kernel/patch-skip.txt"
@@ -103,11 +105,40 @@ walk_firmware_history() {
   return 1
 }
 
+# Raspberry Pi cuts firmware about weekly and skips whichever stable releases fall between cuts, so a version
+# can exist in raspberrypi/linux with no firmware ref naming it. rpi-X.Y.y merges every stable release, and
+# the first-parent chain between two merges sits at one version, so walk it newest-first and take the first
+# commit whose Makefile matches: the fork's last state at that version before it moved on.
+walk_linux_branch() {
+  local branch page list chain sha o v n=0
+  branch="rpi-${KERNEL_VERSION%.*}.y"
+  warn "no firmware ref carries ${KERNEL_VERSION}; walking raspberrypi/linux ${branch} first-parent history"
+  chain=""
+  for page in $(seq 1 "$LINUX_WALK_PAGES"); do
+    list="$(get "${API}/repos/raspberrypi/linux/commits?sha=${branch}&per_page=100&page=${page}" 2> /dev/null)" || break
+    chain="$(printf '%s\n%s' "$chain" "$(printf '%s' "$list" | jq -r '.[] | "\(.sha) \(.parents[0].sha)"')")"
+  done
+  sha="$(printf '%s\n' "$chain" | awk 'NF{print $1; exit}')"
+  while [ -n "$sha" ] && [ "$n" -lt "$LINUX_WALK_MAX" ]; do
+    n=$((n + 1))
+    o="$(get "${RAW}/raspberrypi/linux/${sha}/Makefile" 2> /dev/null)" || return 1
+    v="$(printf '%s\n' "$o" | awk -F' *= *' '/^VERSION/{v=$2}/^PATCHLEVEL/{p=$2}/^SUBLEVEL/{s=$2} END{print v"."p"."s}')"
+    if [ "$v" = "$KERNEL_VERSION" ]; then
+      KERNEL_COMMIT="$sha"
+      KERNEL_SOURCE="linux ${branch}@${sha:0:10}, no firmware release"
+      return 0
+    fi
+    [ "${v##*.}" -lt "${KERNEL_VERSION##*.}" ] && return 1
+    sha="$(printf '%s\n' "$chain" | awk -v s="$sha" '$1==s{print $2; exit}')"
+  done
+  return 1
+}
+
 resolve_kernel_commit() {
-  scan_firmware_channels || walk_firmware_history || true
-  [[ "$KERNEL_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "no raspberrypi/firmware ref provides linux ${KERNEL_VERSION} (what Talos ${TALOS_VERSION} expects).
-Checked channels ${FW_CHANNELS} plus master's last ${FW_HISTORY_PAGE} extra/git_hash commits.
-Resolve by hand (docs/kernel.md, 'If kernel resolution fails'), then either wait for a firmware channel to ship ${KERNEL_VERSION} or move TALOS_VERSION."
+  scan_firmware_channels || walk_firmware_history || walk_linux_branch || true
+  [[ "$KERNEL_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "no raspberrypi ref provides linux ${KERNEL_VERSION} (what Talos ${TALOS_VERSION} expects).
+Checked firmware channels ${FW_CHANNELS}, master's last ${FW_HISTORY_PAGE} extra/git_hash commits, and the last ${LINUX_WALK_MAX} first-parent commits of raspberrypi/linux rpi-${KERNEL_VERSION%.*}.y.
+Resolve by hand (docs/kernel.md, 'If kernel resolution fails'), then either wait for the fork to merge ${KERNEL_VERSION} or move TALOS_VERSION."
   echo "   linux       ${KERNEL_COMMIT}  (via ${KERNEL_SOURCE})"
 }
 
