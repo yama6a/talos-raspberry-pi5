@@ -7,9 +7,11 @@ Background and evidence for all of this: [docs/upstream.md](docs/upstream.md).
 
 ## The only blocker
 
-The official `rpi_5` overlay ships U-Boot built from `rpi_arm64_defconfig`, which has no
-`brcm,bcm2712-pcie` driver, so U-Boot cannot read the NVMe it was loaded from. Everything else this build does
-is either obsolete, a consequence of building a custom kernel, or configuration available to anyone.
+The official `rpi_5` overlay ships U-Boot 2026.01 built from `rpi_arm64_defconfig`, which has no
+`brcm,bcm2712-pcie` driver, so U-Boot cannot read the NVMe it was loaded from. Upstream U-Boot has the driver
+since v2026.07; the overlay has not moved to it because its own NVMe patches do not apply there (see
+[docs/upstream.md](docs/upstream.md), "Upstream state"). Everything else this build does is either obsolete,
+a consequence of building a custom kernel, or configuration available to anyone.
 
 ## Why bother testing
 
@@ -17,16 +19,18 @@ Two payoffs, and the second one is not selfish:
 
 - **Decide whether this repo can be retired.** If the official overlay works on your board, you drop a custom
   kernel build for a schematic ID.
-- **Unblock the fix for everyone else.** The U-Boot patch set exists
-  ([#88](https://github.com/siderolabs/sbc-raspberrypi/pull/88)) and has sat unmerged for months. The
-  maintainer's stated blocker on [#96](https://github.com/siderolabs/sbc-raspberrypi/issues/96) is community
-  testers on both D0 and D1 BCM2712 stepping, not the code. A tested report on either stepping is the single
-  most useful thing anyone reading this can contribute.
+- **Unblock the fix for everyone else.** The PCIe driver is in upstream U-Boot v2026.07, and the overlay's
+  bump to it ([#33](https://github.com/siderolabs/sbc-raspberrypi/pull/33)) is stuck on rebasing the
+  overlay's own NVMe patches. The maintainer's stated blocker on
+  [#96](https://github.com/siderolabs/sbc-raspberrypi/issues/96) is community testers on both D0 and D1
+  BCM2712 stepping, not the code. A tested report on either stepping is the single most useful thing anyone
+  reading this can contribute.
 
-Relevant upstream threads: [#88](https://github.com/siderolabs/sbc-raspberrypi/pull/88) (the fix),
+Relevant upstream threads: [#33](https://github.com/siderolabs/sbc-raspberrypi/pull/33) (the U-Boot bump),
 [#96](https://github.com/siderolabs/sbc-raspberrypi/issues/96) (the bug),
-[#97](https://github.com/siderolabs/sbc-raspberrypi/pull/97) (a second, incomplete attempt),
-[#93](https://github.com/siderolabs/sbc-raspberrypi/pull/93) (cleanup, blocked on #88),
+[#88](https://github.com/siderolabs/sbc-raspberrypi/pull/88) (the out-of-tree patch set, mostly redundant
+since v2026.07), [#97](https://github.com/siderolabs/sbc-raspberrypi/pull/97) (a second, incomplete attempt),
+[#93](https://github.com/siderolabs/sbc-raspberrypi/pull/93) (cleanup, blocked on the U-Boot bump),
 [#81](https://github.com/siderolabs/sbc-raspberrypi/issues/81) /
 [#82](https://github.com/siderolabs/sbc-raspberrypi/issues/82) /
 [#91](https://github.com/siderolabs/sbc-raspberrypi/issues/91) (Pi 5 ethernet on the vanilla path).
@@ -77,13 +81,14 @@ on the Pi 5 ethernet issues; nobody in those threads has a console, which is lik
 
 ### Step 2: only if step 1 passed, fix U-Boot
 
-Fork `siderolabs/sbc-raspberrypi` and cherry-pick the U-Boot patch set from the open PR that adds BCM2712 and
-RP1 support to the `rpi_arm64` build. Two changes:
+Fork `siderolabs/sbc-raspberrypi` and move its U-Boot, not the installer. Two changes:
 
-- add the patches plus a build step producing `arm64/u-boot/rpi_5/u-boot.bin`
-- point `installers/rpi_5/src/main.go` at that path instead of `rpi_generic`
+- set `uboot_version` in `Pkgfile` to 2026.07 or later; the BCM2712 PCIe driver is upstream from there
+- rebase `artifacts/u-boot/patches/0005` to `0008` onto it. On v2026.10 or later, try dropping `0006` and
+  `0007` first, since upstream `09b1c0f9` does the same address translation
 
-Then build an image with the stock Talos imager and that overlay, with **no kernel build**:
+`installers/rpi_5` keeps copying `rpi_generic/u-boot.bin`; that binary is the one that gains the driver. Then
+build an image with the stock Talos imager and that overlay, with **no kernel build**:
 
 ```
 ghcr.io/siderolabs/imager:<talos version>  rpi5 --arch arm64 \
@@ -115,9 +120,9 @@ The Talos version matters far less: any release at or above the overlay's `MinVe
 what makes Image Factory offer `rpi_5` at all. Say which one you used and move on.
 
 Post on [#96](https://github.com/siderolabs/sbc-raspberrypi/issues/96) or
-[#88](https://github.com/siderolabs/sbc-raspberrypi/pull/88) with the revision code, whether you booted from
-SD or NVMe, and the Talos version. That is the evidence the PR is waiting on, and it is the only path that
-ends with no repo to maintain.
+[#33](https://github.com/siderolabs/sbc-raspberrypi/pull/33) with the revision code, the U-Boot version,
+whether you booted from SD or NVMe, and the Talos version. That is the evidence the maintainer is waiting on,
+and it is the only path that ends with no repo to maintain.
 
 ## What gets deleted when this lands
 

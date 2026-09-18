@@ -74,15 +74,17 @@ generic config.
 
 Which BCM2712 device-tree bindings each U-Boot implements:
 
-| Binding | community `talos-rpi5/u-boot` | official `rpi_generic` |
-|---|---|---|
-| `brcm,bcm2712` | yes | yes |
-| `brcm,bcm2712-pm` | yes | yes |
-| `brcm,bcm2712-sdhci` | yes | yes |
-| **`brcm,bcm2712-pcie`** | **yes** | **absent** |
+| Binding | community `talos-rpi5/u-boot` | official `rpi_generic`, U-Boot 2026.01 | upstream U-Boot >= v2026.07 |
+|---|---|---|---|
+| `brcm,bcm2712` | yes | yes | yes |
+| `brcm,bcm2712-pm` | yes | yes | yes |
+| `brcm,bcm2712-sdhci` | yes | yes | yes |
+| **`brcm,bcm2712-pcie`** | **yes** | **absent** | **yes** |
 
-The community fork adds a whole `brcm_pcie_bcm2712_cfg` to `drivers/pci/pcie_brcmstb.c`. Upstream U-Boot does
-not have it either: no `rpi_5_defconfig` exists, and its `pcie_brcmstb.c` matches only `brcm,bcm2711-pcie`.
+The community fork adds a `brcm_pcie_bcm2712_cfg` to `drivers/pci/pcie_brcmstb.c`. Upstream U-Boot has the
+same since v2026.07 (July 2026), from a six-patch `pci: brcmstb` series by Torsten Duwe, under
+`CONFIG_PCI_BRCMSTB`, which `rpi_arm64_defconfig` already sets. There is still no `rpi_5_defconfig`; none is
+needed. The overlay builds U-Boot 2026.01, whose `pcie_brcmstb.c` matches only `brcm,bcm2711-pcie`.
 
 The boot chain, and where it stops:
 
@@ -148,7 +150,7 @@ one with both extensions produce different schematic IDs.
 
 | Step | Verdict | Why |
 |---|---|---|
-| Community U-Boot, via the community overlay | **load-bearing** | the only source of `brcm,bcm2712-pcie` |
+| Community U-Boot, via the community overlay | **load-bearing** | the only shipped U-Boot with `brcm,bcm2712-pcie`. Upstream v2026.07 has it; the official overlay does not build that version yet |
 | Fork kernel plus `MFD_RP1`, `FIRMWARE_RP1`, `MBOX_RP1`, `COMMON_CLK_RP1_SDIO`, `BCM2712_IOMMU` | **in use, not proven necessary** | the RP1 bring-up this image runs on. Vanilla has its own path, untested here |
 | REBASE 1, kernel source and config | load-bearing | follows from the above |
 | REBASE 2, module list filter | consequence only | exists only because this build uses a different kernel |
@@ -161,17 +163,24 @@ one with both extensions produce different schematic IDs.
 
 ## Upstream state
 
-The fix exists. Twice. Neither has landed.
+The driver is upstream. What is missing is the overlay building a U-Boot that has it.
 
 | | |
 |---|---|
-| `sbc-raspberrypi` PR "add Raspberry Pi 5 support to rpi_generic U-Boot build" | the real fix. ~4200 added lines, 14 topical U-Boot patches including a BCM2712 PCIe controller driver and RP1 ethernet. CI unstable, open for months |
-| `sbc-raspberrypi` PR "rpi_5: build dedicated u-boot with RP1 support" | describes 23 patches, but the actual diff is one line pointing the installer at an `rpi_5/u-boot.bin` that the build never produces. Incomplete as submitted |
-| `sbc-raspberrypi` PR "remove rpi_5 installer and unify Pi 5 into rpi_generic" | cleanup, explicitly blocked on the U-Boot patches landing first |
-| `sbc-raspberrypi` issue "rpi_5 overlay ships rpi_generic's u-boot binary" | maintainer: open to reviewing the patch, but wants community members to test on both D0 and D1 stepping before merging |
+| U-Boot v2026.07 | `brcm,bcm2712-pcie` in `drivers/pci/pcie_brcmstb.c`. No fork needed for PCIe |
+| `sbc-raspberrypi` `Pkgfile` | `uboot_version: 2026.01` at v0.2.2 (Sep 2026) |
+| `sbc-raspberrypi` PR #33, renovate's dependency bump | moves U-Boot to 2026.07. Four of the overlay's seven U-Boot patches fail against 2026.07 on a `patch --dry-run`: `0005` to `0007` (NVMe virtual-to-bus address translation) and `0008` (`rpi_arm64_defconfig`: NVMe, EFI bootmeth). Cannot merge as-is |
+| U-Boot v2026.10, in rc | `09b1c0f9 nvme: Fix missing address translation for PCIe inbound access`, upstream's answer to what `0006` and `0007` patch in. Probably lets the overlay drop them rather than rebase them |
+| `sbc-raspberrypi` PR #88 "add Raspberry Pi 5 support to rpi_generic U-Boot build" | open, 14 U-Boot patches including its own BCM2712 PCIe driver and RP1 ethernet. Maintainer wants them upstream first; the PCIe half now is, which makes most of the PR redundant |
+| `sbc-raspberrypi` PR #97 "build dedicated u-boot with RP1 support" | stale since Sep 2026. Maintainer declined to carry a 23-patch set |
+| `sbc-raspberrypi` PR #93 "remove rpi_5 installer and unify Pi 5 into rpi_generic" | cleanup, blocked on the above |
+| `sbc-raspberrypi` issue #96 | maintainer wants test reports on both D0 and D1 stepping before merging anything |
 | `sbc-raspberrypi` issues on Pi 5 ethernet | three open, long threads, all against the vanilla RP1 path this build does not use |
 
-The blocker is test coverage on both BCM2712 steppings, not code. See [../FUTURE_WORK.md](../FUTURE_WORK.md).
+So the path out no longer runs through #88. It is: the overlay bumps U-Boot to 2026.07 or later and rebases or
+drops its NVMe patches, cuts a release, and someone boots an Image Factory `rpi_5` image from NVMe on both
+steppings. RP1 ethernet inside U-Boot is not part of that; U-Boot only needs the NVMe to hand off to GRUB.
+See [../FUTURE_WORK.md](../FUTURE_WORK.md).
 
 ## What would still need doing after U-Boot is fixed
 

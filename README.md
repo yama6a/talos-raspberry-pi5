@@ -14,6 +14,10 @@ dark.
 This build pairs a `raspberrypi/linux` kernel with the community overlay and its Pi 5 U-Boot, which does have
 that driver.
 
+Upstream U-Boot has had the driver since v2026.07. The official overlay still builds U-Boot 2026.01, and its
+own NVMe patches do not apply to 2026.07, so the official image stays SD-only until `siderolabs/sbc-raspberrypi`
+reworks them and ships. That is the remaining gap, and it is theirs to close, not a kernel problem.
+
 If you boot from an **SD card**, the official overlay may well work for you and is far less maintenance. Use
 it. The full audit of what upstream has and has not caught up on is in [docs/upstream.md](docs/upstream.md),
 and the plan to retire this repo is in [FUTURE_WORK.md](FUTURE_WORK.md).
