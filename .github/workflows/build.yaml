@@ -36,7 +36,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm # 4 vCPU / 16 GB, free and unlimited on public repos, native arm64
+    runs-on: ubuntu-26.04-arm # 4 vCPU / 16 GB, free and unlimited on public repos, native arm64
     timeout-minutes: 330 # the hard cap is 360; a full cold build is ~65 min
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

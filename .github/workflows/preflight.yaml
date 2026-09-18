@@ -31,7 +31,7 @@ jobs:
   preflight:
     name: preflight
     # arm64 to match the build, so the overlay compiles for the architecture it actually ships on.
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 15
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # resolve_inputs.sh walks the GitHub API; 60/h unauthenticated
