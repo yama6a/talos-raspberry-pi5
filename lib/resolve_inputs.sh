@@ -12,7 +12,6 @@ API="https://api.github.com"
 FW_CHANNELS="master stable next oldstable" # raspberrypi/firmware refs to try first; master is its current kernel
 FW_HISTORY_PAGE=100                        # failsafe: how far back to walk master's extra/git_hash history
 LINUX_WALK_MAX=200                         # last resort: how many first-parent commits of rpi-X.Y.y to inspect
-LINUX_WALK_PAGES=10                        # commit-list pages (100 each) fetched to reconstruct that chain
 # Only files that can change the image. Editing one, comments included, cuts a new build revision.
 RECIPE_FILES="lib/build.sh lib/preflight.sh build/Makefile.talos kernel/pi5-rpi.fragment kernel/patch-skip.txt"
 
@@ -109,26 +108,25 @@ walk_firmware_history() {
 # the first-parent chain between two merges sits at one version, so walk it newest-first and take the first
 # commit whose Makefile matches: the fork's last state at that version before it moved on.
 walk_linux_branch() {
-  local branch page list chain sha o v n=0
+  local branch sha commit v n=0
   branch="rpi-${KERNEL_VERSION%.*}.y"
   warn "no firmware ref carries ${KERNEL_VERSION}; walking raspberrypi/linux ${branch} first-parent history"
-  chain=""
-  for page in $(seq 1 "$LINUX_WALK_PAGES"); do
-    list="$(get "${API}/repos/raspberrypi/linux/commits?sha=${branch}&per_page=100&page=${page}" 2> /dev/null)" || break
-    chain="$(printf '%s\n%s' "$chain" "$(printf '%s' "$list" | jq -r '.[] | "\(.sha) \(.parents[0].sha)"')")"
-  done
-  sha="$(printf '%s\n' "$chain" | awk 'NF{print $1; exit}')"
-  while [ -n "$sha" ] && [ "$n" -lt "$LINUX_WALK_MAX" ]; do
+  sha="$branch"
+  while [ "$n" -lt "$LINUX_WALK_MAX" ]; do
     n=$((n + 1))
-    o="$(get "${RAW}/raspberrypi/linux/${sha}/Makefile" 2> /dev/null)" || return 1
-    v="$(printf '%s\n' "$o" | awk -F' *= *' '/^VERSION/{v=$2}/^PATCHLEVEL/{p=$2}/^SUBLEVEL/{s=$2} END{print v"."p"."s}')"
+    commit="$(get "${API}/repos/raspberrypi/linux/commits/${sha}" 2> /dev/null)" || return 1
+    sha="$(printf '%s' "$commit" | jq -r '.sha')"
+    v="$(get "${RAW}/raspberrypi/linux/${sha}/Makefile" 2> /dev/null \
+      | awk -F' *= *' '/^VERSION/{v=$2}/^PATCHLEVEL/{p=$2}/^SUBLEVEL/{s=$2} END{if (s != "") print v"."p"."s}')"
+    [ -n "$v" ] || return 1
     if [ "$v" = "$KERNEL_VERSION" ]; then
       KERNEL_COMMIT="$sha"
       KERNEL_SOURCE="linux ${branch}@${sha:0:10}, no firmware release"
       return 0
     fi
     [ "${v##*.}" -lt "${KERNEL_VERSION##*.}" ] && return 1
-    sha="$(printf '%s\n' "$chain" | awk -v s="$sha" '$1==s{print $2; exit}')"
+    sha="$(printf '%s' "$commit" | jq -r '.parents[0].sha // empty')"
+    [ -n "$sha" ] || return 1
   done
   return 1
 }

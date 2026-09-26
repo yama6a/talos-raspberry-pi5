@@ -34,11 +34,12 @@ Procedures, prerequisites and troubleshooting are in the [build runbook](runbook
   imager. Those only mean something inside the pkgs toolchain.
 - The failure they would catch costs one red `build` workflow. `build.yaml` publishes and releases only after
   a green build, so a bad bump never ships.
-- `.github/workflows/preflight.yaml` runs preflight on any PR that moves a pin. `ci.yaml`'s `main-is-green`
-  job fails a PR while main's last `build` run is red.
-- Renovate waits for both before it merges the combined non-major PR. A Talos minor or major never
-  automerges. A person reviews it with the [upgrade runbook](runbooks/upgrade.md).
-- Branch protection enforces neither check. A person can merge past them, Renovate cannot.
+- `.github/workflows/preflight.yaml` runs preflight on every PR. `ci.yaml`'s `main-is-green` job fails a PR
+  while main's last `build` run is red.
+- Both are required checks on main. Renovate merges through GitHub's auto-merge, which waits for the
+  required checks and nothing else. A check that is not required cannot gate a bot.
+- A Talos minor or major never automerges. A person reviews it with the [upgrade runbook](runbooks/upgrade.md).
+- Branch protection does not enforce admins. The owner can merge past a red check, Renovate cannot.
 
 ## Caches
 

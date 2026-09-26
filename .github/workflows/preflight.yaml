@@ -1,15 +1,12 @@
-# The build's checks that need no kernel, run on a moved pin. Renovate's automerge waits for it. For a Talos
-# minor or major it only informs the review in docs/runbooks/upgrade.md. See docs/build.md.
+# The build's checks that need no kernel. A required check on main, so it runs on every PR: GitHub's
+# auto-merge waits only for required checks, and a check that ran only on a moved pin would be skipped or
+# block every other PR. About a minute on an unrelated PR. For a Talos minor or major it only informs the
+# review in docs/runbooks/upgrade.md. See docs/build.md.
 name: preflight
 
 on:
   pull_request:
     branches: [main]
-    paths: # only a moved pin or a change to what preflight reads can fail this
-      - versions.env
-      - kernel/patch-skip.txt
-      - lib/preflight.sh
-      - build/Makefile.talos
   workflow_dispatch:
 
 concurrency:

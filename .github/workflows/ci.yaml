@@ -29,8 +29,8 @@ jobs:
 
   main-is-green:
     name: main-is-green
-    # Stops a bump landing on a broken main, where the next red build says nothing about the bump. Not in
-    # branch protection, so a person can merge the fix past it. Renovate waits for every check.
+    # Stops a bump landing on a broken main, where the next red build says nothing about the bump. A required
+    # check, like preflight. Branch protection does not enforce admins, so the owner can merge the fix past it.
     runs-on: ubuntu-26.04-arm
     permissions:
       contents: read
