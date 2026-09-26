@@ -31,9 +31,8 @@ jobs:
   main-is-green:
     name: main-is-green
     # Stops a bump landing on top of an already-broken main, where the next red build tells you nothing new
-    # about the bump itself. Advisory for people and blocking for bots by construction: main has no branch
-    # protection, so a human can always merge past a red result (which is what the PR fixing main needs to
-    # do), while renovate waits for every check on the branch before it calls the merge API.
+    # about the bump itself. A required status check, like preflight. Branch protection does not enforce
+    # admins, so the repo owner can merge past a red result, which is what the PR fixing main needs to do.
     runs-on: ubuntu-26.04-arm
     permissions:
       contents: read

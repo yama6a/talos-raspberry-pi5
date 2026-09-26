@@ -51,11 +51,12 @@ bootable image. Replaying those on a runner needs the pkgs toolchain to mean any
 would pre-empt costs one red `build` workflow, because `build.yaml` gates publish and release on the build
 succeeding. A bad bump cannot ship an image or cut a release.
 
-`.github/workflows/preflight.yaml` runs this on any PR that moves a pin, and `ci.yaml`'s `main-is-green` job
-refuses a PR when main's last `build` run failed. Renovate waits on both before automerging the combined
-non-major PR. A Talos minor or major is never automerged: preflight covers too little of what one can break,
-so it is reviewed by hand against [upgrade.md](upgrade.md). Neither check is enforced by branch protection, so
-a person can always merge past them; renovate cannot, which is the intent.
+`.github/workflows/preflight.yaml` runs this on every PR, and `ci.yaml`'s `main-is-green` job refuses a PR
+when main's last `build` run failed. Both are required status checks on main. Renovate merges through
+GitHub's auto-merge, which waits for the required checks and nothing else, so a check that is not required
+cannot gate a bot. A Talos minor or major is never automerged: preflight covers too little of what one can
+break, so it is reviewed by hand against [upgrade.md](upgrade.md). Branch protection does not enforce admins,
+so the repo owner can merge past a red check; renovate cannot, which is the intent.
 
 ## Prerequisites
 
