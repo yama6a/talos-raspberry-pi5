@@ -1,5 +1,4 @@
-# A thin dispatcher over lib/. Holds NO logic, versions or values: every target just runs the script it
-# names, so `make build` and `bash lib/build.sh` are identical. `make help` lists everything.
+# A thin dispatcher over lib/. `make build` and `bash lib/build.sh` are identical.
 
 .DEFAULT_GOAL := help
 

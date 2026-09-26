@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Pushes the validated installer to GHCR and stages the release assets. Creating the release is lib/release.sh,
-# so a run that dies here leaves an orphan image tag that no release announced and the next run overwrites.
+# Pushes the validated installer to GHCR and stages the release assets. lib/release.sh creates the release, so a
+# run that dies here leaves only an image tag the next run overwrites.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 # ---- state ----
-# GHCR_USER is deliberately NOT pre-declared: it may come from the environment, and an empty default here
-# would make the ${GHCR_USER:-...} fallback below always win.
+# No GHCR_USER here: it may come from the environment, and an empty default would always lose to the fallback.
 RELEASE_TAG="" # set by resolve_build_revision
 CREATED=""     # set by stage_assets
 REPO_URL=""
@@ -26,17 +25,15 @@ assert_ghcr_token() {
   GHCR_USER="${GHCR_USER:-${GITHUB_REPOSITORY%%/*}}"
 }
 
-# The next free build revision for this Talos version, read off the published releases. Stateless, no counter
-# file. A previous run that pushed an image but never released reuses and overwrites its own N, which is safe
-# because nothing could have consumed a tag no release announced.
+# A run that pushed an image but never released reuses its N. Safe, because no release announced that tag.
 resolve_build_revision() {
   local auth=() releases existing revision
   say "resolving the build revision"
   [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
   releases="$(curl -fsSL --retry 3 ${auth[@]+"${auth[@]}"} \
     "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" 2> /dev/null || true)"
-  # All in jq: `... | grep | sort | tail` exits 1 when nothing matches, the NORMAL case for the first release
-  # of a Talos version, and pipefail turns that into a silent build failure.
+  # All in jq: a grep that matches nothing exits 1, which is normal for a Talos version's first release, and
+  # pipefail would turn that into a failed build.
   existing="$(printf '%s' "$releases" | jq -r --arg t "$TALOS_VERSION" \
     '[.[]?.tag_name // empty | select(startswith($t + "-")) | ltrimstr($t + "-")
       | select(test("^[0-9]+$")) | tonumber] | max // 0' 2> /dev/null || echo 0)"
@@ -48,9 +45,8 @@ resolve_build_revision() {
   else echo "   ${RELEASE_TAG}  (previous: ${TALOS_VERSION}-${existing})"; fi
 }
 
-# SPDX 2.3, hand-built from the resolved inputs rather than scanned out of the image: a filesystem scan cannot
-# tell you which raspberrypi/linux commit the kernel came from, and that pointer is what makes the GPL-2.0
-# source offer in NOTICE checkable.
+# Built from the resolved inputs, not scanned from the image. A scan cannot name the raspberrypi/linux commit,
+# and that commit makes the GPL-2.0 source offer in NOTICE checkable.
 write_sbom() {
   jq -n --arg created "$CREATED" --arg tag "$RELEASE_TAG" --arg repo "$REPO_URL" \
     --arg kver "$KVER" --arg talos_tag "$TALOS_TAG" --arg pkgs_tag "$PKGS_TAG" \
@@ -114,8 +110,7 @@ push_installer() {
   say "pushing ${IMAGE_REPO}"
   printf '%s' "$GHCR_TOKEN" | docker login "$GHCR_SERVER" -u "$GHCR_USER" --password-stdin > /dev/null \
     || die "docker login ${GHCR_SERVER} failed (is the token write:packages for ${GHCR_USER}?)"
-  # In CI the runner is thrown away, and the provenance attestation step needs the session to push the
-  # attestation to the registry, so only a real machine logs out.
+  # CI keeps the login, because the attestation step pushes to the registry with it.
   [ -z "${GITHUB_ACTIONS:-}" ] && trap 'docker logout "$GHCR_SERVER" >/dev/null 2>&1 || true' EXIT
 
   docker pull -q "$INSTALLER_IMG" > /dev/null || die "cannot pull ${INSTALLER_IMG} from the local registry"
@@ -127,13 +122,10 @@ push_installer() {
   DIGEST="$(docker buildx imagetools inspect "${IMAGE_REPO}:${RELEASE_TAG}" --format '{{.Manifest.Digest}}')"
 }
 
-# Generated, not hand-written: every pin that produced this image, so a reader can reproduce it or check the
-# GPL source pointer without cloning anything.
 write_release_notes() {
   local image_sha skipped kernel_commit_short kernel_url overlay_short overlay_url
   image_sha="$(sha256hex "$IMAGE_FILE")"
-  # Precomputed rather than inlined below: backtick handling inside an unquoted heredoc's command
-  # substitution is not portable.
+  # Not inlined below: backticks in a command substitution inside an unquoted heredoc are not portable.
   skipped="$(grep -vE '^[[:space:]]*(#|$)' "${REPO_ROOT}/kernel/patch-skip.txt" | sed 's/^/`/;s/$/`/' | paste -sd' ' -)"
   kernel_commit_short="${KERNEL_COMMIT:0:12}"
   kernel_url="$(jq -r '.kernel_url' "$INPUTS_FILE")"
@@ -181,7 +173,6 @@ RELEASE_TAG="${RELEASE_TAG}"
 IMAGE_DIGEST="${DIGEST}"
 IMAGE_REF="${IMAGE_REPO}:${RELEASE_TAG}"
 EOF
-  # Same facts, unquoted, for the workflow's attestation and release steps.
   [ -n "${GITHUB_OUTPUT:-}" ] && printf 'RELEASE_TAG=%s\nIMAGE_DIGEST=%s\nIMAGE_REF=%s\n' \
     "$RELEASE_TAG" "$DIGEST" "${IMAGE_REPO}:${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
   return 0

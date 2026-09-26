@@ -3,7 +3,7 @@ name: Renovate
 
 on:
   schedule:
-    # Opens PRs. Non-majors arm GitHub's auto-merge and land on green; majors get a Copilot BC check.
+    # Non-majors turn on GitHub's auto-merge and land on green. Majors get a Copilot backward-compatibility check.
     - cron: "13 5 * * *"
   workflow_dispatch:
     inputs:
@@ -21,8 +21,8 @@ jobs:
   renovate:
     uses: yama6a/gha/.github/workflows/renovate.yaml@v2
     permissions:
-      contents: read # Renovate acts through RENOVATE_TOKEN, not GITHUB_TOKEN
-      copilot-requests: write # the BC check's Copilot CLI is the one thing on GITHUB_TOKEN
+      contents: read # Renovate uses RENOVATE_TOKEN, not GITHUB_TOKEN
+      copilot-requests: write # only the Copilot CLI of the backward-compatibility check uses GITHUB_TOKEN
     with:
       log-level: ${{ inputs.logLevel || 'info' }}
       dry-run: ${{ inputs.dryRun || false }}

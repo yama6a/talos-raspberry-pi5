@@ -1,11 +1,11 @@
-# Builds, validates and releases the image. Runs on a free arm64 runner so the kernel compiles natively; an
-# amd64 runner would need QEMU and blow the 6h job cap.
+# Builds, validates and releases the image. arm64, so the kernel compiles natively. amd64 would need QEMU and
+# blow the 6h job cap.
 name: build
 
 on:
   push:
     branches: [main]
-    paths: # everything that can change what gets built; docs and config cannot
+    paths: # what can change the image. Docs and config cannot
       - versions.env
       - lib/**
       - kernel/**
@@ -22,8 +22,7 @@ on:
         default: false
         type: boolean
 
-# Never in parallel: the build revision is derived from the published releases, so two runs would pick the
-# same N. Queue instead of cancelling, so a push during a build is not silently dropped.
+# Never in parallel, or two runs pick the same build revision. Queued, not cancelled, so no push is dropped.
 concurrency:
   group: build
   cancel-in-progress: false
@@ -36,8 +35,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-26.04-arm # 4 vCPU / 16 GB, free and unlimited on public repos, native arm64
-    timeout-minutes: 330 # the hard cap is 360; a full cold build is ~65 min
+    runs-on: ubuntu-26.04-arm # free and unlimited on public repos
+    timeout-minutes: 330 # the hard cap is 360
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PRUNE_BUILD_CACHE: "true"
@@ -54,9 +53,8 @@ jobs:
           FORCE: ${{ inputs.force }}
 
       - name: free disk
-        # The runner pool is heterogeneous: usually ~109 GB free, sometimes ~37 GB, and a cold kernel build
-        # is the thing that would run out. Only language runtimes nothing here uses. Deliberately NOT the
-        # hosted toolcache, which is where `go` lives, and not the swapfile, which ThinLTO linking may want.
+        # Some runners have too little free disk for a cold kernel build. Removes only runtimes nothing here
+        # uses. Keep the hosted toolcache, where `go` lives, and the swapfile, which ThinLTO linking may need.
         if: steps.guard.outputs.build == 'true'
         run: |
           df -h /
@@ -64,8 +62,7 @@ jobs:
           df -h /
 
       - name: install crane
-        # Talos's own installer target shells out to `crane push`. Pinned release binary rather than a
-        # third-party action, matching how ci.yaml installs actionlint and kubeconform.
+        # Talos's installer target calls `crane push`. A pinned release binary, not a third-party action.
         if: steps.guard.outputs.build == 'true'
         run: |
           curl -fsSL https://github.com/google/go-containerregistry/releases/download/v0.21.8/go-containerregistry_Linux_arm64.tar.gz \
@@ -83,7 +80,7 @@ jobs:
       - name: publish to GHCR
         id: publish
         if: steps.guard.outputs.build == 'true' && !inputs.dryRun
-        run: make publish # writes RELEASE_TAG / IMAGE_DIGEST / IMAGE_REF to $GITHUB_OUTPUT
+        run: make publish # writes RELEASE_TAG, IMAGE_DIGEST and IMAGE_REF to $GITHUB_OUTPUT
 
       - name: attest the installer image
         if: steps.publish.outcome == 'success'
@@ -99,8 +96,7 @@ jobs:
         with:
           subject-path: .cache/*/out/metal-arm64-rpi5.raw.xz
 
-      # Last on purpose: the release is what makes a build revision real. A run that dies before here leaves
-      # an image tag no release announced, and the next run reuses and overwrites that revision.
+      # Last: the release makes a build revision real. A run that dies earlier leaves a tag the next run reuses.
       - name: create the release
         if: steps.publish.outcome == 'success'
         run: make release

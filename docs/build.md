@@ -1,231 +1,99 @@
 # The build
 
-## What runs
+Procedures, prerequisites and troubleshooting are in the [build runbook](runbooks/build.md).
 
-| Step | Script | Does |
+## Steps
+
+| Target | Script | Does |
 |---|---|---|
-| `make resolve` | `lib/resolve_inputs.sh` | pure HTTP, ~10s. Writes `.cache/build-inputs.json` |
-| `make preflight` | `lib/preflight.sh` | the build's cheap checks, no Docker and no kernel. A few min |
+| `make resolve` | `lib/resolve_inputs.sh` | HTTP only. Writes `.cache/build-inputs.json` |
+| `make preflight` | `lib/preflight.sh` | the checks that need no Docker and no kernel |
 | `make build` | `lib/build.sh` | checkouts, three rebases, kernel, overlay, installer, raw image |
-| `make validate` | `lib/validate.sh` | offline checks against the built artifacts |
-| `make publish` | `lib/publish.sh` | GHCR push, SBOM, checksums, generated notes |
-| `make release` | `lib/release.sh` | the GitHub release, last so nothing strands a tag |
+| `make validate` | `lib/validate.sh` | offline checks on the built artifacts |
+| `make publish` | `lib/publish.sh` | GHCR push, SBOM, checksums, release notes |
+| `make release` | `lib/release.sh` | the GitHub release, last so a failed run strands no tag |
 
-`build.sh` in order:
+## Local registry and builder
 
-1. local registry container plus a `docker-container` buildx builder
-2. clone `siderolabs/pkgs`, `siderolabs/talos` and `talos-rpi5/sbc-raspberrypi5` at their resolved refs
-3. REBASE 1, kernel source and config
-4. build the kernel, the long pole
-5. REBASE 2, module list
-6. REBASE 3, overlay port
-7. build the overlay
-8. mirror Talos's Dockerfile frontend into the local registry, then build the installer and the raw image
+- The build runs its own registry on `localhost:5010` and its own `docker-container` buildx builder.
+- siderolabs' `bldr` needs BuildKit's merge operation. The builder inside dockerd refuses it.
+- A local registry is also fast and works offline on a re-run.
 
-Step 4 is skipped entirely when a cached kernel matches, see [the kernel cache](#the-kernel-cache).
+## Nothing remote on the critical path
 
-The registry is local (`localhost:5010`) because it is fast, works offline, and supports the BuildKit merge
-operation that siderolabs' `bldr` needs. The builder inside dockerd refuses that operation, which is why the
-build creates its own `docker-container` builder.
+- GitHub's `/archive/` tarballs are not byte-stable across requests. So the build downloads the kernel
+  source once and serves it from a local container. `bldr` then hashes the same bytes the build did.
+- BuildKit resolves Talos's Dockerfile frontend from Docker Hub with a 60-second deadline, and misses it
+  often enough to fail builds an hour in. So the build mirrors that image into the local registry first.
 
-## Preflight
+## Preflight scope
 
-`lib/preflight.sh` is `build.sh`'s library, not a copy of it. `build.sh` sources it and calls the same
-functions, so a preflight check cannot drift from what the build does.
+- `lib/preflight.sh` is also `build.sh`'s library. `build.sh` sources it, so a preflight check cannot drift
+  from the build.
+- Preflight skips everything that needs the kernel tree: patch replay, `olddefconfig`, the compile, the
+  imager. Those only mean something inside the pkgs toolchain.
+- The failure they would catch costs one red `build` workflow. `build.yaml` publishes and releases only after
+  a green build, so a bad bump never ships.
+- `.github/workflows/preflight.yaml` runs preflight on any PR that moves a pin. `ci.yaml`'s `main-is-green`
+  job fails a PR while main's last `build` run is red.
+- Renovate waits for both before it merges the combined non-major PR. A Talos minor or major never
+  automerges. A person reviews it with the [upgrade runbook](runbooks/upgrade.md).
+- Branch protection enforces neither check. A person can merge past them, Renovate cannot.
 
-Run alone it does only the parts that need no Docker, no kernel source and no compiler:
+## Caches
 
-| Proves | How |
-|---|---|
-| Talos names a pkgs commit and a kernel version that exist | `make resolve` |
-| the kernel version maps to a `raspberrypi/linux` commit | `resolve_kernel_commit`, see [kernel.md](kernel.md) |
-| the pkgs checkout matches what Talos names | `git describe` against the resolver |
-| `kernel/patch-skip.txt` names patches pkgs still has | glob `kernel/build/patches` |
-| the build's `pkg.yaml` rewrites still find their anchors | the patch-gate and config-merge injections |
-| Talos's Dockerfile still declares a frontend to mirror | line 1 `# syntax =` |
-| the overlay compiles against this Talos's machinery | REBASE 3, then `go build -o /dev/null` |
+| Key | Covers | Used for |
+|---|---|---|
+| `build_key` | upstream inputs only | the `.cache/<build_key>/` dir. A script edit reuses checkouts and the kernel tarball |
+| `fingerprint` | upstream inputs plus the recipe files | CI's decision to rebuild at all. See [releases.md](releases.md) |
+| `kernel_key` | pkgs commit, linux commit, fragment, `patch-skip.txt` | the kernel cache below |
 
-Everything about the kernel is left to the real build on purpose: whether the pkgs patches still apply to the
-fork, whether the fragment survives `olddefconfig`, whether it compiles, whether the imager produces a
-bootable image. Replaying those on a runner needs the pkgs toolchain to mean anything, and the failure it
-would pre-empt costs one red `build` workflow, because `build.yaml` gates publish and release on the build
-succeeding. A bad bump cannot ship an image or cut a release.
-
-`.github/workflows/preflight.yaml` runs this on any PR that moves a pin, and `ci.yaml`'s `main-is-green` job
-refuses a PR when main's last `build` run failed. Renovate waits on both before automerging the combined
-non-major PR. A Talos minor or major is never automerged: preflight covers too little of what one can break,
-so it is reviewed by hand against [upgrade.md](upgrade.md). Neither check is enforced by branch protection, so
-a person can always merge past them; renovate cannot, which is the intent.
-
-## Prerequisites
-
-- An arm64 host. macOS on Apple Silicon or arm64 Linux. An amd64 host works only under emulation and is
-  unusably slow for a kernel build.
-- Docker with an arm64 Linux VM, and room for the build. Reserve 60 GB or more; the kernel objdir plus the
-  BuildKit snapshots are what fill it.
-- GNU make >= 4. macOS ships 3.81, which the upstream Makefiles refuse to run; `brew install make` installs
-  it as `gmake` and the build finds it.
-- `docker git curl jq go python3 perl crane`. The build checks and names each one; `crane` is needed
-  because Talos's own installer target shells out to it. `xz` and `zstd` are only needed
-  inside the validation container, not on the host.
-
-A cold build is roughly 40 minutes on an M2 Pro (12 cores) and 90 on a 4-core arm64 GitHub runner, almost
-all of it the kernel. With the kernel cache warm it is about 8 minutes.
-
-## The build cache
-
-`.cache/<build-key>/` per set of upstream inputs, so bumping a version lands in a fresh directory and the
-previous one stays intact. The key hashes the resolved pkgs commit, kernel commit, overlay commit and both
-extension digests. It deliberately does NOT cover the build scripts, so editing one reuses the existing
-checkouts and downloaded kernel tarball instead of forcing a cold rebuild.
-
-The `fingerprint` in `build-inputs.json` is the stricter one: it covers the recipe files too, and is what CI
-compares to decide whether a push needs a rebuild at all.
-
-`make clean` removes the current key's directory, `make distclean` removes `.cache` entirely.
-
-### The kernel cache
-
-A cold kernel compile is over an hour, and CI runners are ephemeral, so the build reuses a kernel image built
-from identical inputs instead of recompiling it. After a successful compile it pushes the image to
-`ghcr.io/<owner>/<repo>:kernel-<kernel_key>`; on a later run it pulls that tag and skips `make kernel`.
-
-`kernel_key` covers exactly what goes into the kernel and nothing else: the pkgs commit, the
-`raspberrypi/linux` commit, `kernel/pi5-rpi.fragment` and `kernel/patch-skip.txt`. So editing this script,
-bumping the overlay or changing an extension pin all keep the cache, while anything that would actually change
-the kernel invalidates it.
-
-Best-effort in both directions. No token means no push and a silent skip, so a local build never asks for
-credentials. A pull miss or a push failure only costs the compile time. Set `KERNEL_CACHE=false` to force a
-recompile.
-
-The safety net if the key were ever wrong: REBASE 2 derives the kernel version from the image's own module
-tree, and validation asserts the UKI's `.uname` equals it.
-
-### BuildKit's cache
-
-`PRUNE_BUILD_CACHE=true` no longer prunes unconditionally, only when free space is under `PRUNE_BELOW_MB`
-(40 GB). The GitHub runner pool is heterogeneous and usually leaves ~114 GB free at that point, so pruning
-was throwing away the cache that makes a retry cheap for no reason.
+- **Kernel cache**: a cold kernel compile takes over an hour, and CI runners are ephemeral. So after a
+  compile the build pushes the kernel image to `ghcr.io/<owner>/<repo>:kernel-<kernel_key>`. A later run
+  with the same key pulls it and skips the compile.
+- The kernel cache is best-effort. A missing token skips the push, and a miss only costs compile time.
+  `KERNEL_CACHE=false` forces a compile.
+- A wrong `kernel_key` cannot ship a mislabeled image. Validation checks the UKI label against the kernel
+  that was built.
+- **BuildKit cache**: `PRUNE_BUILD_CACHE=true` prunes only when free space is under `PRUNE_BELOW_MB`. A
+  retry then keeps the cache that makes it cheap.
 
 ## The three rebases
 
-Things the pinned Talos release and the community overlay cannot do for themselves. All automated.
+The pinned Talos release and the community overlay cannot do these for themselves. Each rebase checks the
+anchor it edits and fails naming what upstream moved.
 
-**1. Kernel source and config.** Point the kernel source at `raspberrypi/linux` at the resolved commit, layer
-`kernel/pi5-rpi.fragment` over siderolabs/pkgs' stock arm64 config, and reconcile with `make olddefconfig`
-under the real clang toolchain. Every `=y` line in the fragment is then re-asserted against the reconciled
-`.config`, so an unmet dependency fails in seconds rather than after a 40-minute compile. Also gates pkgs'
-own kernel patches, below. See [kernel.md](kernel.md).
+1. **Kernel source and config.** Point pkgs' kernel recipe at `raspberrypi/linux`, layer the fragment, and
+   check every bake-in after `olddefconfig`. An unmet dependency then fails in seconds, not after the compile.
+   See [kernel.md](kernel.md).
+2. **Module list.** Talos's arm64 module list names drivers this config does not build, and `nvme` is built
+   in. The build intersects the list with the real module tree.
+3. **Overlay port.** The community overlay targets older Talos machinery. The build bumps its machinery
+   dependency and patches `main.go` so it compiles.
 
-The kernel tarball is downloaded once and served from a local HTTP container for the rest of the build.
-GitHub's `/archive/` tarballs are not byte-stable across requests, so a hash taken on the host would not
-match what the builder downloads for itself.
-
-**2. Module list.** `talos/hack/modules-arm64.txt` names drivers this config does not build (`bnxt_re` and
-friends) and treats `nvme` as a module when it is built in here, so the initramfs step fails on the first
-missing `.ko`. The build intersects the list with the module tree the kernel actually produced.
-
-That rewrite is the only change made to the Talos checkout, and it would make `git describe --dirty` report
-`-dirty`. That string stamps the OS version, so nodes would report `<version>-dirty` and a clean `talosctl`
-would warn it is "older than client", because semver ranks a `-dirty` prerelease below the clean release. The
-file is marked `assume-unchanged` so every describe in the build stays clean while the modified content still
-feeds the installer.
-
-**3. Overlay port.** The overlay copies U-Boot, `config.txt` and the device trees onto the EFI partition. It
-targets older Talos machinery, and a newer overlay API added a `ctx` argument to every method, so it does not
-compile as-is. The build bumps its machinery dependency to match the pinned Talos and patches `main.go`.
-
-Each rebase asserts the anchor it edits and fails naming what upstream moved, rather than silently producing
-a wrong image.
-
-## The Dockerfile frontend mirror
-
-Talos's Dockerfile opens with a `# syntax =` line naming a frontend image on Docker Hub, and BuildKit allows
-60 seconds to resolve it, which it misses often enough to fail whole builds an hour in. So before the
-installer stage the build pulls that image through the docker daemon, republishes it to the local registry,
-and rewrites the `# syntax =` line to point there. Same motivation as the local kernel source server: nothing
-remote sits on the critical path once the build is running, and a re-run works offline.
-
-The rewrite gets the same `assume-unchanged` treatment as the module list, so it cannot make `git describe`
-report `-dirty` and stamp that onto the OS version.
+- The Talos checkout edits are marked `assume-unchanged`. A dirty tree would stamp `-dirty` onto the OS
+  version, and `talosctl` would then call a clean release "older than client".
 
 ## pkgs kernel patches
 
-siderolabs/pkgs carries kernel patches written against vanilla kernel.org. This builds `raspberrypi/linux`,
-where some are already merged or collide with the fork's own fix for the same bug. Each patch is dry-run
-first: whatever applies is applied, only the slugs in `kernel/patch-skip.txt` are skipped, and anything else
-fails the build. So a pkgs bump that adds a patch this build cannot apply stops it, instead of quietly
-dropping a fix.
-
-A slug is the patch filename minus its `NNNN-` prefix, because pkgs renumbers its patch files. A slug that
-matches no patch also fails the build, before the kernel download. The first thing to check there is a
-rename: the error prints every slug pkgs currently ships, so a reworded subject is visible side by side.
-
-To re-check the list after a pkgs bump, dry-run each patch against the cached kernel source:
-
-```
-KEY=$(jq -r .build_key .cache/build-inputs.json)
-SRC=$(mktemp -d) && tar -xzf ".cache/$KEY/srcserve/linux.tar.gz" -C "$SRC" --strip-components=1
-for p in ".cache/$KEY/checkouts/pkgs/kernel/build/patches"/*.patch; do
-  patch -d "$SRC" -p1 -N --dry-run --silent < "$p" >/dev/null 2>&1 \
-    && echo "applies  $(basename "$p")" || echo "CONFLICT $(basename "$p")"
-done
-```
-
-A conflict is not automatically a skip. Check whether the fork already carries the fix, by grepping for a
-symbol the patch adds, before adding it to `patch-skip.txt`.
+- pkgs writes its kernel patches against vanilla kernel.org. Some are already in `raspberrypi/linux`, or
+  collide with the fork's own fix for the same bug.
+- The build dry-runs each patch. It applies what applies, skips only the slugs in `kernel/patch-skip.txt`,
+  and fails on anything else. So a pkgs bump that adds a patch this build cannot apply stops the build and
+  does not drop the fix.
+- A slug is the patch filename without its `NNNN-` prefix, because pkgs renumbers its files. A slug that
+  matches no patch fails the build before the kernel download.
+- To re-check the skip list after a pkgs bump, see the [build runbook](runbooks/build.md#re-check-the-patch-skip-list).
 
 ## Validation
 
-Offline, no hardware. macOS cannot loop-mount Linux filesystems, so both checks run in a Linux container.
+Offline, no hardware. The checks run in a Linux container, because macOS cannot loop-mount Linux filesystems.
 
-- Integrity and size: `xz -t` passes and the compressed image is in a plausible range.
-- Partition layout: loop-mount the raw image and confirm `EFI`, `BOOT` and `META`. `STATE` and `EPHEMERAL` do
-  not exist yet; first boot creates them.
-- Pi 5 boot bits on the EFI partition: `config.txt` with the disable-wifi and disable-bt lines, `u-boot.bin`,
-  `bcm2712-rpi-5-b.dtb`, `overlays/disable-{wifi,bt}.dtbo`.
-- Kernel: read the installer UKI's `.uname` section and check it against the kernel that was actually
-  compiled. A mismatch means a mislabeled image, see [kernel.md](kernel.md).
-- Extensions: decompress the UKI's `.initrd` and confirm both extensions are in it.
+- `xz -t` passes and the compressed size is plausible.
+- The raw image has the `EFI`, `BOOT` and `META` partitions. First boot creates `STATE` and `EPHEMERAL`.
+- The EFI partition holds `config.txt` with Wi-Fi and Bluetooth off, `u-boot.bin`, `bcm2712-rpi-5-b.dtb`
+  and both `.dtbo` overlays.
+- The installer UKI's `.uname` equals the kernel that was compiled.
+- The UKI's initrd holds both extensions.
 
 None of this proves the Pi 5 boot chain works. Only booting a board does.
-
-## Troubleshooting
-
-- `missing separator` in a Makefile: you are on make 3.81. Install GNU make >= 4; the build finds `gmake`.
-- `mergeop has been disabled`: the builder inside dockerd cannot run siderolabs' `bldr`. The build creates a
-  `docker-container` buildx builder that can, so this means that step was skipped or the builder was deleted.
-- `no space left on device` during kernel finalize: the Docker VM disk is too small. Raise it, or set
-  `PRUNE_BUILD_CACHE=true` to drop the BuildKit cache once the kernel image is in the local registry.
-- `BAKE-IN MISSING: <SYM>`: a config symbol did not survive `olddefconfig`, usually an unmet dependency.
-  Adjust `kernel/pi5-rpi.fragment`.
-- `cannot stat .../<mod>.ko` at initramfs: the module list drifted. REBASE 2 handles it, so re-run.
-- `digest mismatch` on the kernel source: GitHub `/archive/` tarballs are not byte-stable. The local source
-  server exists for exactly this. Nothing to do.
-- `pkgs checkout describes as X, but Talos names Y`: an upstream tag moved. Re-run `make resolve`.
-- `FAILED: pkgs patch does not apply to raspberrypi/linux: <slug>` during the kernel build: a pkgs bump added
-  or reworked a patch that collides with the fork. Re-run the patch by hand with `patch -p1 -N --dry-run`
-  against the extracted tree: `Reversed (or previously applied)` means the fix is already in the rpi tree, so
-  add the slug to `kernel/patch-skip.txt`. A real conflict means rebasing the patch onto the fork instead.
-  Note that `patch` defaults to fuzz 2, so a hunk reported as applied can still have landed on loose context.
-- `kernel/patch-skip.txt names a patch that pkgs does not have`: pkgs dropped or renamed it. The error lists
-  every slug pkgs currently ships, so match the entry to whichever is the same patch.
-- `kernel/build/pkg.yaml patch loop not found` or `anchor not found`: upstream restructured the file the build
-  rewrites. Re-derive the anchor in `lib/preflight.sh` against the new pkgs.
-- `grep: write error: Broken pipe` and the build dies: a producer was SIGPIPEd by an early-exiting consumer
-  (`| head -1`, `| grep -q`) and `pipefail` turned that into a build failure. Read the file directly with an
-  awk that exits, rather than piping. This killed a 75-minute run once, right after the kernel finished.
-- `cannot pull docker/dockerfile-upstream from Docker Hub`: the daemon could not fetch Talos's Dockerfile
-  frontend. Usually stale stored Hub credentials, which the CLI hands over and then hangs on instead of
-  falling back to anonymous. `docker login` fixes it, and so does `docker logout`, because every image this
-  build pulls is public. Confirm with `DOCKER_CONFIG=$(mktemp -d) docker pull alpine`, which bypasses them.
-- `DeadlineExceeded ... resolving docker.io/docker/dockerfile-upstream` should not happen any more: the
-  frontend is mirrored locally before the installer stage. Seeing it means the mirror step was skipped.
-- `Directory not empty` from the `checkouts` target on macOS: Finder dropped a fresh `.DS_Store` into a tree
-  `rm` was still walking. The target retries, so this only surfaces if it fails three times.
-
-## Reference
-
-- Boot assets and the imager: <https://www.talos.dev/latest/talos-guides/install/boot-assets/>
-- Talos upgrades: <https://www.talos.dev/latest/talos-guides/upgrading-talos/>

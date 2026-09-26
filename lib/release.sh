@@ -10,7 +10,7 @@ source "${SCRIPT_DIR}/common.sh"
 load_staged_release() {
   [ -f "${OUT_DIR}/release.env" ] || die "missing ${OUT_DIR}/release.env, run: make publish"
   # shellcheck disable=SC1090
-  source "${OUT_DIR}/release.env" # publish.sh writes RELEASE_TAG, IMAGE_DIGEST, IMAGE_REF
+  source "${OUT_DIR}/release.env" # RELEASE_TAG, IMAGE_DIGEST, IMAGE_REF
 }
 
 assert_release_absent() {
