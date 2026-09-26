@@ -12,8 +12,7 @@ API="https://api.github.com"
 FW_CHANNELS="master stable next oldstable" # raspberrypi/firmware refs to try first; master is its current kernel
 FW_HISTORY_PAGE=100                        # failsafe: how far back to walk master's extra/git_hash history
 LINUX_WALK_MAX=200                         # last resort: how many first-parent commits of rpi-X.Y.y to inspect
-# Only files that can change what gets built, so editing one cuts a new build revision. Docs, workflows and
-# the renovate config are excluded because they cannot.
+# Only files that can change the image. Editing one, comments included, cuts a new build revision.
 RECIPE_FILES="lib/build.sh lib/preflight.sh build/Makefile.talos kernel/pi5-rpi.fragment kernel/patch-skip.txt"
 
 # ---- state ----
@@ -136,14 +135,12 @@ resolve_kernel_commit() {
   scan_firmware_channels || walk_firmware_history || walk_linux_branch || true
   [[ "$KERNEL_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "no raspberrypi ref provides linux ${KERNEL_VERSION} (what Talos ${TALOS_VERSION} expects).
 Checked firmware channels ${FW_CHANNELS}, master's last ${FW_HISTORY_PAGE} extra/git_hash commits, and the last ${LINUX_WALK_MAX} first-parent commits of raspberrypi/linux rpi-${KERNEL_VERSION%.*}.y.
-Resolve by hand (docs/kernel.md, 'If kernel resolution fails'), then either wait for the fork to merge ${KERNEL_VERSION} or move TALOS_VERSION."
+Resolve by hand (docs/runbooks/build.md, 'Resolve the kernel by hand'), then either wait for the fork to merge ${KERNEL_VERSION} or move TALOS_VERSION."
   echo "   linux       ${KERNEL_COMMIT}  (via ${KERNEL_SOURCE})"
 }
 
-# build_key names the cache dir and covers UPSTREAM inputs only, so editing a build script reuses the
-# existing checkouts and kernel tarball. fingerprint adds the recipe and is what CI compares to decide
-# whether to rebuild. kernel_key covers only what goes into the kernel image, so the cross-run kernel cache
-# survives an edit to this script or to the overlay/extension pins.
+# build_key: upstream inputs only, so a script edit reuses the checkouts. fingerprint: adds the recipe, CI rebuilds
+# when it changes. kernel_key: only kernel inputs, so the kernel cache survives overlay and extension bumps.
 compute_keys() {
   local f
   BUILD_KEY="${TALOS_VERSION}-$(printf '%s' \

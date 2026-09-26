@@ -1,5 +1,4 @@
-# Static checks only. The image build is its own workflow and does not run on pull requests: a full build is
-# ~65 min of runner time, and a broken bump surfaces on main instead.
+# Static checks only. The image build runs on main, not on pull requests, because of its runner time.
 name: CI
 
 on:
@@ -30,9 +29,8 @@ jobs:
 
   main-is-green:
     name: main-is-green
-    # Stops a bump landing on top of an already-broken main, where the next red build tells you nothing new
-    # about the bump itself. A required status check, like preflight. Branch protection does not enforce
-    # admins, so the repo owner can merge past a red result, which is what the PR fixing main needs to do.
+    # Stops a bump landing on a broken main, where the next red build says nothing about the bump. A required
+    # check, like preflight. Branch protection does not enforce admins, so the owner can merge the fix past it.
     runs-on: ubuntu-26.04-arm
     permissions:
       contents: read
@@ -60,7 +58,7 @@ jobs:
     runs-on: ubuntu-26.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # A broken config silently halts ALL dependency updates.
+      # A broken config silently stops every dependency update.
       - uses: yama6a/gha/.github/actions/validate-renovate-config@v2
         with:
           config-file: renovate.json5

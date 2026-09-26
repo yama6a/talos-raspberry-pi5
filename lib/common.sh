@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-#
-# Shared helpers for every script here. Source it near the top: it self-locates the repo root, loads the
-# committed versions.env, and derives what a flat file cannot hold.
-# It sets no shell options; each script keeps its own `set` line.
+# Shared helpers. Loads versions.env and derives what a flat file cannot hold. Sets no shell options.
 
 [[ -n "${_COMMON_SH:-}" ]] && return
 _COMMON_SH=1
@@ -11,7 +8,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 VERSIONS_FILE="${REPO_ROOT}/versions.env"
 if [ ! -f "$VERSIONS_FILE" ]; then
-  # die() is not defined yet, so error raw.
   printf '\033[1;31mERROR: missing %s (committed recipe; it should be in the repo checkout)\033[0m\n' \
     "$VERSIONS_FILE" >&2
   exit 1
@@ -19,11 +15,10 @@ fi
 # shellcheck disable=SC1090
 source "$VERSIONS_FILE"
 
-MACHINERY_VERSION="${TALOS_VERSION}" # the overlay is rebuilt against this (must match TALOS_VERSION)
+MACHINERY_VERSION="${TALOS_VERSION}" # the overlay compiles against this machinery
 IMAGE_NAME="metal-arm64-rpi5.raw.xz" # the staged raw disk image (the rpi5/grub imager emits .raw.xz)
 
-# Lowercased because GHCR rejects uppercase, and derived from the repo slug so a fork publishes to its own
-# namespace with no edit. CI sets GITHUB_REPOSITORY; locally it falls back to upstream.
+# From the repo slug, so a fork publishes to its own namespace. Lowercased, because GHCR rejects uppercase.
 GHCR_SERVER="ghcr.io"
 : "${GITHUB_REPOSITORY:=yama6a/talos-raspberry-pi5}"
 IMAGE_REPO="${GHCR_SERVER}/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
@@ -48,7 +43,6 @@ bad() {
   printf '  \033[31m[FAIL]\033[0m %s\n' "$1"
   FAIL=$((FAIL + 1))
 }
-# Returns non-zero if anything failed, so a caller can `summary || exit 1`.
 summary() {
   printf '\n=============== summary: %d passed, %d failed ===============\n' "$PASS" "$FAIL"
   [ "$FAIL" -eq 0 ]
@@ -71,21 +65,18 @@ require() {
   done
 }
 
-# macOS ships `shasum` and no `sha256sum`; most Linux images ship both. Prefer the coreutils tool.
+# macOS has only `shasum`.
 sha256() { if command -v sha256sum > /dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 sha512() { if command -v sha512sum > /dev/null; then sha512sum "$@"; else shasum -a 512 "$@"; fi; }
 sha256hex() { sha256 "$@" | awk '{print $1}'; }
 sha512hex() { sha512 "$@" | awk '{print $1}'; }
 
-# The kres Makefiles upstream need GNU make >= 4; macOS's /usr/bin/make is 3.81 and dies with "missing
-# separator". Homebrew installs GNU make as `gmake`, Linux ships it as `make`, so probe rather than hardcode.
-# Echoes the absolute path; the caller puts its dir first on PATH so recursive $(MAKE) resolves to it too.
+# The upstream Makefiles need GNU make >= 4. macOS ships 3.81, and Homebrew installs GNU make as `gmake`.
 gnu_make() {
   local m
   for m in gmake make; do
     command -v "$m" > /dev/null || continue
-    # Captured, not piped into head/grep -q: an early-exiting consumer can SIGPIPE the producer, and every
-    # caller of this runs under pipefail.
+    # Captured, not piped into head: an early exit would SIGPIPE make, and callers run under pipefail.
     case "$("$m" --version 2> /dev/null)" in "GNU Make "[4-9]* | "GNU Make "[1-9][0-9]*) ;; *) continue ;; esac
     command -v "$m"
     return 0
@@ -93,13 +84,11 @@ gnu_make() {
   die "GNU make >= 4 not found (macOS: brew install make, which installs it as gmake; Debian/Ubuntu: apt install make)"
 }
 
-# Reads the resolver's build-inputs.json into shell vars and derives the cache paths from it. Every script
-# after resolve_inputs.sh calls this.
 load_inputs() {
   [ -f "$INPUTS_FILE" ] || die "missing ${INPUTS_FILE}, run: make resolve"
   local j="$INPUTS_FILE"
   PKGS_REF=$(jq -r '.pkgs_ref' "$j")       # the exact pkgs commit Talos names in its Makefile
-  PKGS_DESC=$(jq -r '.pkgs_describe' "$j") # ... as `git describe` renders it, which tags the kernel image
+  PKGS_DESC=$(jq -r '.pkgs_describe' "$j") # the same commit as `git describe` renders it. Tags the kernel image
   KERNEL_VERSION=$(jq -r '.kernel_version' "$j")
   KERNEL_COMMIT=$(jq -r '.kernel_commit' "$j")
   KERNEL_SOURCE=$(jq -r '.kernel_source' "$j") # which firmware ref we found the commit through
@@ -113,7 +102,7 @@ load_inputs() {
   META_FILE="${OUT_DIR}/build-meta.env" # what the build resolved only by building; validate/publish read it
 }
 
-# The build's own output facts (kernel version actually compiled, the image tags it produced).
+# What only the build knows: the compiled kernel version and the image tags.
 load_meta() {
   [ -f "$META_FILE" ] || die "missing ${META_FILE}, run: make build"
   # shellcheck disable=SC1090

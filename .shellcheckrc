@@ -1,4 +1,4 @@
-disable=SC2034   # lib/common.sh constants (KERNEL_*, IMAGE_*, PKGS_*, MACHINERY_VERSION) are read by the scripts that source it
-disable=SC1091   # common.sh is sourced via a computed path; shellcheck cannot follow it and -x does not help
-disable=SC2015   # `cond && ok || err` is the deliberate reporting idiom, not an if-then-else mistake
-disable=SC2016   # single-quoted bodies are templates evaluated elsewhere (in-container or remote shell)
+disable=SC2034   # "variable appears unused": the scripts that source lib/common.sh read its constants
+disable=SC1091   # "not following sourced file": common.sh comes from a computed path, so shellcheck cannot find it
+disable=SC2015   # "A && B || C is not if-then-else": `cond && ok || err` is how every script reports a check
+disable=SC2016   # "expressions do not expand in single quotes": those bodies run in a container or a remote shell

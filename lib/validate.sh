@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks the built image offline: partition layout, Pi 5 boot bits, kernel label, baked extensions.
-# No `set -e`: every check runs and the summary reports all failures at once.
+# No `set -e`, so every check runs and the summary lists all failures.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,7 +21,7 @@ assert_image_built() {
   [ -f "$IMAGE_FILE" ] || die "missing ${IMAGE_FILE}, run: make build"
 }
 
-# The installer's boot binary is a UKI: one EFI file holding the kernel, initrd and cmdline together.
+# The installer boots from a UKI: one EFI file with the kernel, initrd and cmdline.
 extract_uki() {
   UKI_DIR="$BUILD_DIR/uki"
   rm -rf "$UKI_DIR"
@@ -62,8 +62,8 @@ check_raw_image() {
   fi
 }
 
-# The UKI's .uname section is the version LABEL, written from Talos's DefaultKernelVersion rather than from
-# our kernel, so cross-check it against what we actually compiled. A mismatch means a mislabeled image.
+# The UKI's .uname comes from Talos's DefaultKernelVersion, not from the compiled kernel. A mismatch means a
+# mislabeled image.
 check_kernel_and_extensions() {
   if docker run --rm -e KVER="$KVER" -e WANT="$KERNEL_VERSION" -v "$UKI_DIR:/w" "$ALPINE_IMAGE" sh -c '
   apk add -q python3 xz zstd >/dev/null 2>&1

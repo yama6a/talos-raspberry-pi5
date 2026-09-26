@@ -1,114 +1,62 @@
 # The kernel
 
-## Why a fork kernel at all
+Procedures, including resolving a kernel by hand, are in the [build runbook](runbooks/build.md).
 
-Not because vanilla lacks RP1 any more. Vanilla carries the Pi 5's wired NIC as of Linux 6.18, and stock Talos
-enables it.
+## Why a fork kernel
 
-The honest answer is that this is the configuration known to work here, not one proven necessary. The fork
-kernel and its RP1 drivers boot these boards; the vanilla path has never been booted on them. Swapping is
-mechanically easy, since the overlay compiles the device tree from whichever kernel image it is handed, so
-kernel and DTB stay consistent either way. What is unproven is the RP1 bring-up itself.
+- The image uses the `raspberrypi/linux` fork because it is the configuration known to boot these boards.
+  Nobody has proven that it is still necessary.
+- Vanilla Linux drives the Pi 5 wired NIC from 6.18 on, and stock Talos turns it on.
+- Vanilla and the fork bring RP1 up by different routes. RP1 is the Pi 5 south bridge that the NIC, USB and
+  GPIO hang off.
 
-The gap that IS proven is U-Boot, not the kernel. See [upstream.md](upstream.md), and
-[../FUTURE_WORK.md](../FUTURE_WORK.md) for the test that would settle the kernel question.
+| Route | Kernel side | Device tree side |
+|---|---|---|
+| fork, used here | `MFD_RP1` and `FIRMWARE_RP1`, which exist only in the fork | the fork's DTBs |
+| vanilla, never booted here | `macb` matches `raspberrypi,rp1-gem` directly | `rp1-nexus.dtsi` describes RP1 as a PCI device |
 
-On this image RP1 comes up through `MFD_RP1` and `FIRMWARE_RP1`, which are fork-only. Vanilla instead
-describes RP1 as a PCI device in `rp1-nexus.dtsi` and needs neither. Both routes end at `macb` driving `end0`.
-
-Talos welds a hardened clang/ThinLTO kernel into its initramfs and installer, so you cannot drop a foreign
-kernel in. The kernel has to be rebuilt through Talos's own recipe, with the source swapped underneath.
+- Both routes end at `macb` driving `end0`.
+- The overlay compiles its device tree from whatever kernel image it gets. So kernel and DTB always match,
+  and a swap to vanilla is cheap. The open question is whether the vanilla RP1 bring-up works on this
+  hardware. [FUTURE_WORK.md](../FUTURE_WORK.md) has the test that settles it.
+- The gap that is proven is U-Boot, not the kernel. See [upstream.md](upstream.md).
+- Talos builds its kernel with hardened clang and ThinLTO and welds it into the initramfs and installer. So a
+  foreign kernel cannot be dropped in. The build runs Talos's own kernel recipe with the source swapped.
 
 ## Why the kernel version is derived, never pinned
 
-Talos hardcodes the kernel version it expects, as `DefaultKernelVersion` in `pkg/machinery/constants`, and
-the imager stamps THAT string onto the boot image's `.uname` field regardless of what was actually compiled.
-
-If the two differ the image ships mislabeled: the running kernel is real and correct, but the UKI, and
-anything reading it such as `kubectl get nodes` or `talosctl version`, reports Talos's number instead. There
-is no way to make the imager report the truth, so instead the build compiles exactly what Talos expects and
-the two match by construction.
-
-`lib/resolve_inputs.sh` does that, over plain HTTP with no clones:
-
-1. Read `DefaultKernelVersion` out of the pinned Talos tag.
-2. Find the `raspberrypi/linux` commit carrying that version. The fork has no per-version tags, only rebased
-   branches, so the mapping goes through `raspberrypi/firmware`: each firmware ref's `extra/git_hash` names
-   the linux commit that ref's kernel was built from. The four channel HEADs (`master`, `stable`, `next`,
-   `oldstable`) are tried first, and `master` usually matches.
-3. Failing that, walk `master`'s `extra/git_hash` history, which is a dense index of every recent kernel,
-   newest first.
-4. Failing that too, walk `raspberrypi/linux` itself: the first-parent history of `rpi-X.Y.y`, newest first,
-   until a commit's `Makefile` says the version. Raspberry Pi cuts firmware about weekly and skips whichever
-   stable releases fall between cuts, so about half the odd patch levels never get a firmware ref. The fork
-   still merges every one, and the commit picked is its last state at that version before the next merge.
-   `build-inputs.json` records this as `kernel_source: linux rpi-X.Y.y@<sha>, no firmware release`.
-
-The build then re-checks the downloaded tarball's own `Makefile` version, and validation re-checks the
-compiled kernel against the UKI label at the end. Three independent checks, because a mislabeled image is
-the kind of thing nobody notices for months.
-
-## If kernel resolution fails
-
-`make resolve` found no firmware ref and no `rpi-X.Y.y` commit carrying the version Talos wants. That means
-either a very old Talos is being rebuilt, or the fork has not merged that stable release yet. Inspect by hand:
-
-```
-for b in master stable next oldstable; do
-  h=$(curl -fsSL "https://raw.githubusercontent.com/raspberrypi/firmware/$b/extra/git_hash" | tr -d '[:space:]')
-  v=$(curl -fsSL "https://raw.githubusercontent.com/raspberrypi/linux/$h/Makefile" \
-        | awk -F' = ' '/^VERSION/{a=$2}/^PATCHLEVEL/{p=$2}/^SUBLEVEL/{c=$2} END{print a"."p"."c}')
-  echo "$b -> $v ($h)"
-done
-
-# older versions: the linux commit is the git_hash at each historical master commit that changed it
-gh api "repos/raspberrypi/firmware/commits?path=extra/git_hash&sha=master" --jq '.[].sha'
-
-# no firmware ref at all: the stable merges on the fork branch, newest first
-gh api "repos/raspberrypi/linux/commits?sha=rpi-6.18.y&per_page=100" \
-  --jq '.[] | select(.parents | length > 1) | "\(.sha) \(.commit.message | split("\n")[0])"'
-```
-
-Then either wait for the fork to merge that version, or move `TALOS_VERSION` to a release whose expected
-kernel does exist. Do not pin a nearby kernel: that is exactly the mislabeling above.
+- Talos hardcodes the kernel version it expects as `DefaultKernelVersion`. The imager writes that string
+  into the boot image's `.uname` field, whatever was compiled.
+- A different compiled version ships a mislabeled image. `kubectl get nodes` and `talosctl version` then
+  report Talos's number, not the running kernel's.
+- The imager cannot be made to report the truth. So the build compiles exactly the version Talos expects,
+  and the label is right by construction.
+- `lib/resolve_inputs.sh` maps that version to a `raspberrypi/linux` commit. The fork has no version tags,
+  so the mapping goes through `raspberrypi/firmware` first, then the fork's own branch history.
+- Three independent checks guard the label: the resolver, the downloaded tarball's `Makefile`, and
+  validation of the built UKI. A mislabeled image is the kind of fault nobody notices for months.
+- Never pin a nearby kernel when resolution fails. That is exactly the mislabeling above.
 
 ## siderolabs/pkgs
 
-Not pinned either. Talos's `PKGS ?=` Makefile line names the commit it was built against, and the build
-checks that exact commit out. That checkout's `git describe` tags the kernel image and is passed on as
-`PKGS=` to the overlay and `PKG_KERNEL=` to the installer, so a few commits of drift would propagate through
-the whole build. The build hard-fails if the checkout describes as anything else.
-
-pkgs also supplies the stock arm64 kernel config, which is already 4K pages, and the kernel patches that
-`kernel/patch-skip.txt` gates. See [build.md](build.md).
+- Not pinned either. Talos's own `Makefile` names the pkgs commit it was built against, and the build checks
+  out exactly that commit.
+- That checkout's `git describe` tags the kernel image and feeds the overlay and the installer. So a few
+  commits of drift would reach the whole build, and the build stops on any mismatch.
+- pkgs also supplies the stock arm64 kernel config and the kernel patches that `kernel/patch-skip.txt`
+  gates. See [build.md](build.md).
 
 ## The config fragment
 
-`kernel/pi5-rpi.fragment` is appended to pkgs' stock arm64 config, then `make olddefconfig` fills in
-everything not set explicitly. Every `=y` line in the fragment is re-asserted afterwards, so an unmet
-dependency fails the build rather than silently dropping a driver. The assertion list is generated from the
-fragment itself, so the two cannot drift.
+- `kernel/pi5-rpi.fragment` layers over pkgs' stock arm64 config. `make olddefconfig` fills in the rest.
+- Most of its lines only restate what stock already sets. The build re-checks every `=y` line after
+  `olddefconfig`, so an upstream config change cannot drop a driver without failing the build.
+- The fragment's own comments give the reason for each line.
 
-What each line does relative to the stock config, which is what to check before editing one:
+## Known limitation
 
-| Symbols | Against the stock Talos arm64 config |
-|---|---|
-| `MFD_RP1`, `MBOX_RP1`, `FIRMWARE_RP1`, `COMMON_CLK_RP1_SDIO`, `BCM2712_IOMMU` | absent from stock. The RP1 bring-up this image actually uses |
-| `BLK_DEV_NVME` | stock builds it as a module; here it is `=y` |
-| `ARM64_4K_PAGES`, `PCIE_BRCMSTB`, `MACB`, `BCM2835_WDT`, `WATCHDOG`, `PINCTRL_RP1`, `COMMON_CLK_RP1`, `PINCTRL_BCM2712`, `BCM2712_MIP`, `INET_DIAG_DESTROY` | already `=y`. Asserted so a config change upstream cannot drop one silently |
-
-**4K pages.** The kernel source is a Pi tree, whose own `bcm2712_defconfig` is 16K. Some storage software
-does not cope with 16K, so the fragment holds the config at Talos's 4K.
-
-**NVMe built in.** Takes the module out of the boot path. The cost is that `nvme.ko` no longer exists, which
-is part of why the module list needs filtering.
-
-**`INET_DIAG_DESTROY`** lets a privileged pod force-close established sockets with `ss -K`, which is how a
-wedged `macb` NIC gets recovered without a reboot.
-
-## Known kernel-side limitation
-
-A recent kernel does not fix the Pi 5 `macb` TX-stall wedge
-([sbc-raspberrypi#91](https://github.com/siderolabs/sbc-raspberrypi/issues/91)). What the recent kernel buys
-is the ability to turn EEE off at all, which is the mitigation. The mitigation itself is runtime
-configuration, not something this image can carry.
+- The Pi 5 `macb` TX-stall wedge
+  ([sbc-raspberrypi#91](https://github.com/siderolabs/sbc-raspberrypi/issues/91)) is not fixed by a recent
+  kernel.
+- A recent kernel only makes it possible to turn EEE off, which is the mitigation. That is runtime config,
+  so this image cannot carry it.

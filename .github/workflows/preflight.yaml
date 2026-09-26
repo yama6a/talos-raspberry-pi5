@@ -1,14 +1,7 @@
-# The cheap half of the build, run against a moved pin: the upstream checkouts still look the way the build
-# expects, the files the build rewrites still have their anchors, and the overlay still compiles against this
-# Talos's machinery. Runs the same lib/preflight.sh that build.sh sources, so it cannot drift from the build.
-#
-# Deliberately does NOT touch the kernel: no source download, no patch replay, no olddefconfig. Those need the
-# real toolchain to mean anything, and the failure they would pre-empt costs one red build workflow, because
-# build.yaml gates publish and release on the build succeeding.
-#
-# A required status check on main. GitHub's auto-merge, which renovate uses, merges the moment every required
-# check is green, so a check that only runs when a pin moves would either be skipped by the merge or block
-# every other PR forever. It runs on every PR instead; an unrelated PR spends about a minute here.
+# The build's checks that need no kernel. A required check on main, so it runs on every PR: GitHub's
+# auto-merge waits only for required checks, and a check that ran only on a moved pin would be skipped or
+# block every other PR. About a minute on an unrelated PR. For a Talos minor or major it only informs the
+# review in docs/runbooks/upgrade.md. See docs/build.md.
 name: preflight
 
 on:
@@ -26,14 +19,14 @@ permissions:
 jobs:
   preflight:
     name: preflight
-    # arm64 to match the build, so the overlay compiles for the architecture it actually ships on.
+    # arm64, so the overlay compiles for the architecture it ships on.
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 15
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # resolve_inputs.sh walks the GitHub API; 60/h unauthenticated
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # resolve_inputs.sh walks the rate-limited GitHub API
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: preflight
-        # GOTOOLCHAIN=auto (the default) fetches whatever the overlay's go.mod asks for, so no Go pin here.
+        # No Go pin: GOTOOLCHAIN=auto fetches what the overlay's go.mod asks for.
         run: make preflight
