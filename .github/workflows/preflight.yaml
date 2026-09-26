@@ -6,18 +6,14 @@
 # real toolchain to mean anything, and the failure they would pre-empt costs one red build workflow, because
 # build.yaml gates publish and release on the build succeeding.
 #
-# Signal for the hand review of a Talos minor or major (docs/upgrade.md); a gate only for renovate's automerge
-# of the combined non-major PR, together with the main-is-green job in ci.yaml.
+# A required status check on main. GitHub's auto-merge, which renovate uses, merges the moment every required
+# check is green, so a check that only runs when a pin moves would either be skipped by the merge or block
+# every other PR forever. It runs on every PR instead; an unrelated PR spends about a minute here.
 name: preflight
 
 on:
   pull_request:
     branches: [main]
-    paths: # only a moved pin or a change to what preflight reads can fail this
-      - versions.env
-      - kernel/patch-skip.txt
-      - lib/preflight.sh
-      - build/Makefile.talos
   workflow_dispatch:
 
 concurrency:
