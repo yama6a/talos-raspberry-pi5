@@ -13,12 +13,13 @@ CONFIG_ARM64_4K_PAGES=y
 # CONFIG_ARM64_16K_PAGES is not set
 
 # The reason this build exists. RP1 is the south bridge the wired NIC, USB and GPIO hang off, and stock Talos
-# sets none of these five: they exist only in the raspberrypi/linux fork.
+# sets none of these six: they exist only in the raspberrypi/linux fork.
 CONFIG_MFD_RP1=y
 CONFIG_MBOX_RP1=y
 CONFIG_FIRMWARE_RP1=y
 CONFIG_COMMON_CLK_RP1_SDIO=y
 CONFIG_BCM2712_IOMMU=y
+CONFIG_PWM_RP1=y
 
 # Rest of the RP1 and BCM2712 bring-up, already set by stock Talos. Asserted alongside the five above so a
 # partial regression is as loud as a total one.
