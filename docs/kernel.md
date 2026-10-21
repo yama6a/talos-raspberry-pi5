@@ -49,8 +49,11 @@ Procedures, including resolving a kernel by hand, are in the [build runbook](run
 ## The config fragment
 
 - `kernel/pi5-rpi.fragment` layers over pkgs' stock arm64 config. `make olddefconfig` fills in the rest.
-- Most of its lines only restate what stock already sets. The build re-checks every `=y` line after
+- Most of its lines only restate what stock already sets. The build re-checks every `=y` and `=m` line after
   `olddefconfig`, so an upstream config change cannot drop a driver without failing the build.
+- Talos puts only the modules named in its `hack/modules-arm64.txt` into the image. `PI_MODULES` in
+  `lib/build.sh` adds the fragment's `=m` drivers to that list, and the build fails if one was not built.
+  udev loads each module when its device appears.
 - The fragment's own comments give the reason for each line.
 
 ## Known limitation

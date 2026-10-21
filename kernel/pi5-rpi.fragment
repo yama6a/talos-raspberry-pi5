@@ -13,21 +13,24 @@ CONFIG_ARM64_4K_PAGES=y
 # CONFIG_ARM64_16K_PAGES is not set
 
 # The reason this build exists. RP1 is the south bridge the wired NIC, USB and GPIO hang off, and stock Talos
-# sets none of these seven: they exist only in the raspberrypi/linux fork.
+# sets none of these six: they exist only in the raspberrypi/linux fork.
 CONFIG_MFD_RP1=y
 CONFIG_MBOX_RP1=y
 CONFIG_FIRMWARE_RP1=y
 CONFIG_COMMON_CLK_RP1_SDIO=y
 CONFIG_BCM2712_IOMMU=y
 CONFIG_PWM_RP1=y
-CONFIG_SENSORS_RP1_ADC=y
 
-# Rest of the RP1 and BCM2712 bring-up, already set by stock Talos. Asserted alongside the seven above so a
+# Rest of the RP1 and BCM2712 bring-up, already set by stock Talos. Asserted alongside the six above so a
 # partial regression is as loud as a total one.
 CONFIG_PINCTRL_RP1=y
 CONFIG_COMMON_CLK_RP1=y
 CONFIG_PINCTRL_BCM2712=y
 CONFIG_BCM2712_MIP=y
+
+# The RP1 temperature and voltage sensor. A module, as in bcm2712_defconfig: the driver tries to bind only once,
+# when it registers. Built in, that runs before RP1 creates the ADC device, so the driver never binds.
+CONFIG_SENSORS_RP1_ADC=m
 
 # NVMe as a built-in rather than stock's module, so the root device needs nothing from the initramfs. This is
 # why nvme.ko disappears from the module tree and the module list has to be filtered.

@@ -108,9 +108,9 @@ point_pkgs_at_rpi_kernel() {
 
 stage_kernel_config() {
   cp "${REPO_ROOT}/kernel/pi5-rpi.fragment" "$CHK/pkgs/kernel/build/pi5-rpi.fragment"
-  # Read from the fragment so the two cannot drift: every `CONFIG_X=y` line becomes an assertion inside the
-  # build container, checked after olddefconfig reconciles the merge.
-  BAKEINS="$(grep -oE '^CONFIG_[A-Z0-9_]+=y' "${REPO_ROOT}/kernel/pi5-rpi.fragment" | tr '\n' ' ')"
+  # Read from the fragment so the two cannot drift: every `CONFIG_X=y` and `=m` line becomes an assertion inside
+  # the build container, checked after olddefconfig reconciles the merge.
+  BAKEINS="$(grep -oE '^CONFIG_[A-Z0-9_]+=[ym]' "${REPO_ROOT}/kernel/pi5-rpi.fragment" | tr '\n' ' ')"
 }
 
 # pkgs' kernel patches target vanilla kernel.org; we build raspberrypi/linux, where some are already merged or

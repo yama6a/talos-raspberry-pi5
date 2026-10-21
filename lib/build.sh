@@ -22,6 +22,7 @@ SRCSERVER_NAME="talos-srcserver" # local HTTP server for the (non-byte-stable) k
 SRCSERVER_PORT="8099"
 # renovate: datasource=docker
 SRCSERVER_IMAGE="nginx:alpine"
+PI_MODULES=(kernel/drivers/hwmon/rp1-adc.ko) # the fragment's `=m` drivers. Talos ships only listed modules
 
 # ---- state ----
 # GMAKE, TALOS_MK, CHK, PKGS_PATCH_SKIP, SRCDIR, KSHA256, KSHA512 and BAKEINS come from preflight.sh.
@@ -130,7 +131,7 @@ prune_buildkit_cache_if_tight() {
 # The stock list names drivers our config does not build (bnxt_re and friends), and nvme is built in rather
 # than a module, so the initramfs step fails on the first missing .ko. Intersect it with the real module tree.
 filter_module_list() {
-  local cid mf
+  local cid mf m
   say "REBASE 2, filter modules-arm64.txt to modules the kernel actually built"
   docker pull -q "$KIMG" > /dev/null
   cid="$(docker create "$KIMG" sh)"
@@ -142,7 +143,11 @@ filter_module_list() {
   [ -n "$KVER" ] || die "no module tree in ${KIMG}; the kernel build produced no modules"
   grep "usr/lib/modules/${KVER}/" "$BUILD_DIR/kfiles.txt" | sed "s#usr/lib/modules/${KVER}/##" | grep -vE '/$' | sort -u > "$BUILD_DIR/kexist.txt"
   mf="$CHK/talos/hack/modules-arm64.txt"
+  printf '%s\n' "${PI_MODULES[@]}" >> "$mf"
   grep -Fxf "$BUILD_DIR/kexist.txt" "$mf" > "$mf.new" && mv "$mf.new" "$mf"
+  for m in "${PI_MODULES[@]}"; do
+    grep -qxF "$m" "$mf" || die "the kernel did not build ${m}, which the fragment asks for"
+  done
   keep_describe_clean hack/modules-arm64.txt
   echo "   modules list pinned to kernel ${KVER}"
 }
