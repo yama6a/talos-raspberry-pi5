@@ -56,10 +56,21 @@ Procedures, including resolving a kernel by hand, are in the [build runbook](run
   udev loads each module when its device appears.
 - The fragment's own comments give the reason for each line.
 
+## Patches this repo carries
+
+`kernel/patches` holds fixes for the rpi tree that neither pkgs nor `raspberrypi/linux` carries yet. How the
+build applies them is in [build.md](build.md#local-kernel-patches).
+
+| Patch | Why |
+|---|---|
+| `net-macb-shorten-the-TX-watchdog-on-PCIe-attached-GEM` | The rpi tree recovers a stalled TX queue from `ndo_tx_timeout`, which the netdev watchdog calls after 5 s by default. This sets it to 1 s on RP1. See [#56](https://github.com/yama6a/talos-raspberry-pi5/issues/56) |
+
 ## Known limitation
 
 - The Pi 5 `macb` TX-stall wedge
   ([sbc-raspberrypi#91](https://github.com/siderolabs/sbc-raspberrypi/issues/91)) is not fixed by a recent
-  kernel.
+  kernel. The tree recovers from each stall, and the patch above shortens the recovery to about 1 s.
+- The netdev watchdog checks a queue only after it stops, when the TX ring is full. A stall on a lightly
+  loaded link can last longer than 1 s before the ring fills.
 - A recent kernel only makes it possible to turn EEE off, which is the mitigation. That is runtime config,
   so this image cannot carry it.

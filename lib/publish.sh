@@ -66,7 +66,7 @@ write_sbom() {
       filesAnalyzed: false, licenseDeclared: "GPL-2.0-only", licenseConcluded: "GPL-2.0-only",
       externalRefs: [{referenceCategory: "SECURITY", referenceType: "cpe23Type",
                       referenceLocator: ("cpe:2.3:o:linux:linux_kernel:" + $i.kernel_version + ":*:*:*:*:*:*:*")}],
-      comment: ("Patched with siderolabs/pkgs " + $i.pkgs_describe + " kernel/build/patches, minus the entries in kernel/patch-skip.txt.")},
+      comment: ("Patched with siderolabs/pkgs " + $i.pkgs_describe + " kernel/build/patches, minus the entries in kernel/patch-skip.txt, plus kernel/patches.")},
      {SPDXID: "SPDXRef-talos", name: "talos", versionInfo: $talos_tag,
       downloadLocation: ("https://github.com/siderolabs/talos/tree/" + $i.talos),
       filesAnalyzed: false, licenseDeclared: "MPL-2.0", licenseConcluded: "MPL-2.0"},
@@ -123,10 +123,21 @@ push_installer() {
 }
 
 write_release_notes() {
-  local image_sha skipped kernel_commit_short kernel_url overlay_short overlay_url
+  local image_sha skipped added added_row f s kernel_commit_short kernel_url overlay_short overlay_url
   image_sha="$(sha256hex "$IMAGE_FILE")"
   # Not inlined below: backticks in a command substitution inside an unquoted heredoc are not portable.
   skipped="$(grep -vE '^[[:space:]]*(#|$)' "${REPO_ROOT}/kernel/patch-skip.txt" | sed 's/^/`/;s/$/`/' | paste -sd' ' -)"
+  # Each patch links to its file at the release tag, so the notes show what changed in the kernel. No row when
+  # kernel/patches is empty: an empty row would read as a patch that went missing.
+  added=""
+  for f in "${REPO_ROOT}/kernel/patches"/*.patch; do
+    [ -e "$f" ] || continue
+    s="$(basename "$f" .patch)"
+    case "$s" in [0-9]*-*) s="${s#*-}" ;; esac
+    added="${added:+${added} }[\`${s}\`](${REPO_URL}/blob/${RELEASE_TAG}/kernel/patches/$(basename "$f"))"
+  done
+  added_row=""
+  [ -n "$added" ] && added_row=$'\n'"| Added kernel patches | ${added} |"
   kernel_commit_short="${KERNEL_COMMIT:0:12}"
   kernel_url="$(jq -r '.kernel_url' "$INPUTS_FILE")"
   overlay_short="${SBCOVERLAY_VERSION:0:12}"
@@ -159,7 +170,7 @@ Pin \`${IMAGE_REPO}:${TALOS_VERSION}@${DIGEST}\` to track rebuilds of this Talos
 | Pi 5 overlay | [\`${overlay_short}\`](${overlay_url}) |
 | iscsi-tools | \`${ISCSI_EXT}\` |
 | util-linux-tools | \`${UTIL_EXT}\` |
-| Skipped pkgs patches | ${skipped} |
+| Skipped pkgs patches | ${skipped} |${added_row}
 
 Image digest \`${DIGEST}\`, \`${IMAGE_NAME}\` sha256 \`${image_sha}\`.
 

@@ -47,7 +47,7 @@ Procedures, prerequisites and troubleshooting are in the [build runbook](runbook
 |---|---|---|
 | `build_key` | upstream inputs only | the `.cache/<build_key>/` dir. A script edit reuses checkouts and the kernel tarball |
 | `fingerprint` | upstream inputs plus the recipe files | CI's decision to rebuild at all. See [releases.md](releases.md) |
-| `kernel_key` | pkgs commit, linux commit, fragment, `patch-skip.txt` | the kernel cache below |
+| `kernel_key` | pkgs commit, linux commit, fragment, `patch-skip.txt`, `kernel/patches` | the kernel cache below |
 
 - **Kernel cache**: a cold kernel compile takes over an hour, and CI runners are ephemeral. So after a
   compile the build pushes the kernel image to `ghcr.io/<owner>/<repo>:kernel-<kernel_key>`. A later run
@@ -85,6 +85,17 @@ anchor it edits and fails naming what upstream moved.
 - A slug is the patch filename without its `NNNN-` prefix, because pkgs renumbers its files. A slug that
   matches no patch fails the build before the kernel download.
 - To re-check the skip list after a pkgs bump, see the [build runbook](runbooks/build.md#re-check-the-patch-skip-list).
+
+## Local kernel patches
+
+- `kernel/patches` holds fixes for the rpi tree that neither pkgs nor `raspberrypi/linux` carries yet. See
+  [kernel.md](kernel.md).
+- The build copies each one into pkgs' patch dir with a `9` prefix, so it applies after pkgs' own patches and
+  through the same dry-run gate.
+- A local patch is never skipped. When it stops applying, the build fails and names it. Rebase it onto the new
+  kernel commit, or delete it once the rpi tree has the fix.
+- Its content is part of `kernel_key` and of the fingerprint. Adding or editing one rebuilds the kernel.
+- The release notes list each one under "Added kernel patches", linked to its file at the release tag.
 
 ## Validation
 

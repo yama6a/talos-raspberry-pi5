@@ -142,15 +142,21 @@ Resolve by hand (docs/runbooks/build.md, 'Resolve the kernel by hand'), then eit
 # build_key: upstream inputs only, so a script edit reuses the checkouts. fingerprint: adds the recipe, CI rebuilds
 # when it changes. kernel_key: only kernel inputs, so the kernel cache survives overlay and extension bumps.
 compute_keys() {
-  local f
+  local f patches_hash
   BUILD_KEY="${TALOS_VERSION}-$(printf '%s' \
     "${PKGS_REF}|${KERNEL_COMMIT}|${SBCOVERLAY_VERSION}|${ISCSI_EXT}|${UTIL_EXT}" | sha256hex | cut -c1-8)"
   RECIPE_HASH="$(cd "$REPO_ROOT" && for f in $RECIPE_FILES; do
     [ -f "$f" ] || die "recipe file ${f} is missing; RECIPE_FILES in resolve_inputs.sh is stale"
     sha256hex "$f"
   done | sha256hex)"
-  FINGERPRINT="$(printf '%s' "${BUILD_KEY}|${MACHINERY_VERSION}|${RECIPE_HASH}" | sha256hex)"
-  KERNEL_KEY="$(printf '%s' "${PKGS_REF}|${KERNEL_COMMIT}|$(sha256hex "${REPO_ROOT}/kernel/pi5-rpi.fragment")|$(sha256hex "${REPO_ROOT}/kernel/patch-skip.txt")" | sha256hex | cut -c1-16)"
+  # kernel/patches is a directory, so it cannot be listed in RECIPE_FILES. Hashed in sorted order, the order the
+  # build applies it in.
+  patches_hash="$(cd "$REPO_ROOT" && for f in kernel/patches/*.patch; do
+    [ -e "$f" ] || continue
+    sha256hex "$f"
+  done | sha256hex)"
+  FINGERPRINT="$(printf '%s' "${BUILD_KEY}|${MACHINERY_VERSION}|${RECIPE_HASH}|${patches_hash}" | sha256hex)"
+  KERNEL_KEY="$(printf '%s' "${PKGS_REF}|${KERNEL_COMMIT}|$(sha256hex "${REPO_ROOT}/kernel/pi5-rpi.fragment")|$(sha256hex "${REPO_ROOT}/kernel/patch-skip.txt")|${patches_hash}" | sha256hex | cut -c1-16)"
 }
 
 # Both the build's input and the release's provenance record.
