@@ -8,7 +8,7 @@ help: ## Display this help.
 
 ##@ Image
 .PHONY: resolve
-resolve: ## Resolve pkgs + kernel from the pinned Talos release into .cache/build-inputs.json (network only, ~10s).
+resolve: ## Resolve pkgs, kernel and extension digests from the pinned Talos release into .cache/build-inputs.json (network only, ~10s).
 	bash lib/resolve_inputs.sh
 
 .PHONY: preflight

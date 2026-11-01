@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Resolves what the Talos release implies but does not pin: the pkgs commit, the kernel version it expects,
-# and the raspberrypi/linux commit carrying that version. Writes .cache/build-inputs.json.
+# the raspberrypi/linux commit carrying that version, and the system extension digests. Writes
+# .cache/build-inputs.json.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,6 +10,7 @@ source "${SCRIPT_DIR}/common.sh"
 # ---- knobs ----
 RAW="https://raw.githubusercontent.com"
 API="https://api.github.com"
+EXT_INDEX="siderolabs/extensions"          # on ghcr.io. Its image-digests file pins every extension for one Talos release
 FW_CHANNELS="master stable next oldstable" # raspberrypi/firmware refs to try first; master is its current kernel
 FW_HISTORY_PAGE=100                        # failsafe: how far back to walk master's extra/git_hash history
 LINUX_WALK_MAX=200                         # last resort: how many first-parent commits of rpi-X.Y.y to inspect
@@ -22,6 +24,8 @@ PKGS_REF=""
 KERNEL_VERSION="" # set by resolve_kernel_version
 KERNEL_COMMIT=""  # set by resolve_kernel_commit
 KERNEL_SOURCE=""
+ISCSI_EXT="" # set by resolve_extensions
+UTIL_EXT=""
 BUILD_KEY="" # set by compute_keys
 RECIPE_HASH=""
 FINGERPRINT=""
@@ -139,6 +143,36 @@ Resolve by hand (docs/runbooks/build.md, 'Resolve the kernel by hand'), then eit
   echo "   linux       ${KERNEL_COMMIT}  (via ${KERNEL_SOURCE})"
 }
 
+# Unauthenticated, so the GitHub token never reaches ghcr.io.
+ghcr_get() { curl -fsSL --retry 3 "$@"; }
+
+# The extension tags float: siderolabs rebuilds `iscsi-tools:v0.2.0` from its main branch, and a newer build can
+# link libraries the Talos release does not ship. The extensions image for the release lists the digests built
+# for it, the same list Image Factory uses.
+resolve_extensions() {
+  local token accept index arm64 layer digests=""
+  token="$(ghcr_get "https://ghcr.io/token?scope=repository:${EXT_INDEX}:pull" | jq -r '.token')" \
+    || die "cannot get a ghcr.io pull token for ${EXT_INDEX}"
+  accept="Accept: application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json"
+  index="$(ghcr_get -H "Authorization: Bearer ${token}" -H "$accept" \
+    "https://ghcr.io/v2/${EXT_INDEX}/manifests/${TALOS_VERSION}")" \
+    || die "ghcr.io/${EXT_INDEX}:${TALOS_VERSION} does not exist, so the extension digests for this Talos release are unknown"
+  arm64="$(jq -r '.manifests[] | select(.platform.architecture == "arm64") | .digest' <<< "$index")"
+  [ -n "$arm64" ] || die "ghcr.io/${EXT_INDEX}:${TALOS_VERSION} has no arm64 manifest"
+  for layer in $(ghcr_get -H "Authorization: Bearer ${token}" -H "$accept" \
+    "https://ghcr.io/v2/${EXT_INDEX}/manifests/${arm64}" | jq -r '.layers[].digest'); do
+    digests="$(ghcr_get -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/${EXT_INDEX}/blobs/${layer}" \
+      | tar -xzO image-digests 2> /dev/null)" && break
+  done
+  [ -n "$digests" ] || die "ghcr.io/${EXT_INDEX}:${TALOS_VERSION} has no image-digests file (upstream changed the layout?)"
+  ISCSI_EXT="$(grep -m1 '^ghcr.io/siderolabs/iscsi-tools:' <<< "$digests")" \
+    || die "the ${TALOS_VERSION} extensions index lists no iscsi-tools"
+  UTIL_EXT="$(grep -m1 '^ghcr.io/siderolabs/util-linux-tools:' <<< "$digests")" \
+    || die "the ${TALOS_VERSION} extensions index lists no util-linux-tools"
+  echo "   iscsi-tools ${ISCSI_EXT}"
+  echo "   util-linux  ${UTIL_EXT}"
+}
+
 # build_key: upstream inputs only, so a script edit reuses the checkouts. fingerprint: adds the recipe, CI rebuilds
 # when it changes. kernel_key: only kernel inputs, so the kernel cache survives overlay and extension bumps.
 compute_keys() {
@@ -189,6 +223,7 @@ say "resolving build inputs for Talos ${TALOS_VERSION}"
 resolve_pkgs
 resolve_kernel_version
 resolve_kernel_commit
+resolve_extensions
 compute_keys
 write_inputs_file
 print_result

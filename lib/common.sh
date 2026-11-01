@@ -92,6 +92,8 @@ load_inputs() {
   KERNEL_VERSION=$(jq -r '.kernel_version' "$j")
   KERNEL_COMMIT=$(jq -r '.kernel_commit' "$j")
   KERNEL_SOURCE=$(jq -r '.kernel_source' "$j") # which firmware ref we found the commit through
+  ISCSI_EXT=$(jq -r '.iscsi_ext' "$j")
+  UTIL_EXT=$(jq -r '.util_ext' "$j")
   BUILD_KEY=$(jq -r '.build_key' "$j")
   FINGERPRINT=$(jq -r '.fingerprint' "$j")
   KERNEL_KEY=$(jq -r '.kernel_key' "$j") # narrower than the fingerprint: keys the cross-run kernel cache

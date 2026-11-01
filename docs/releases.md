@@ -13,8 +13,8 @@ Each build pushes three OCI tags and one GitHub release. The GitHub release uses
 | `latest` | on every release | the newest build, any version |
 
 - The same package also holds `kernel-<hash>` tags. They are the build's kernel cache, not release artifacts.
-- One Talos version can have several builds. The overlay commit and the extension digests move on their own,
-  and `raspberrypi/linux` can be rebased for the same kernel version. The revision `N` counts those.
+- One Talos version can have several builds. The overlay commit moves on its own, and `raspberrypi/linux` can
+  be rebased for the same kernel version. The revision `N` counts those.
 - Pin the rolling tag with a digest: `ghcr.io/yama6a/talos-raspberry-pi5:vX.Y.Z@sha256:...`. A rebuild then
   shows up as a digest bump and a Talos upgrade as a tag bump, which Renovate's docker datasource handles.
 - A Renovate consumer that tracks the release tag, not the image, needs `regex` versioning with a `build`

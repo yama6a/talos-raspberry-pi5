@@ -100,18 +100,7 @@ is in [upgrade.md](../upgrade.md). Below, `$OLD` and `$NEW` are the pkgs refs of
    `ArtifactsPath`, all five targets, all four flags. The overlay's `profiles/rpi5/rpi5.yaml` still says
    `bootloader: grub`. Check the notes for changes to how grub installs or where arm64 grub reads the cmdline.
 
-8. Check the extension constraints. The pins in `versions.env` predate the new minor:
-
-   ```
-   for img in $(grep -oE 'ghcr.io/siderolabs/[a-z-]+:[^"]+' versions.env); do
-     crane export "$img" - | tar -xO manifest.yaml | grep -A2 compatibility
-   done
-   ```
-
-   Expected: a `version:` constraint the new Talos meets. The imager refuses an extension that does not, so
-   this fails the build, not the node. Renovate brings new extension digests in the combined PR.
-
-9. Validate the cluster's machine configs with the new `talosctl`:
+8. Validate the cluster's machine configs with the new `talosctl`:
 
    ```
    talosctl validate --mode metal --config controlplane.yaml
@@ -121,7 +110,7 @@ is in [upgrade.md](../upgrade.md). Below, `$OLD` and `$NEW` are the pkgs refs of
    Expected: no errors. Deprecation warnings name what to migrate before a later release removes the field.
    Check the notes for removed `talosctl` flags that any script uses.
 
-10. Merge, then watch the build:
+9. Merge, then watch the build:
 
     ```
     gh run watch --repo yama6a/talos-raspberry-pi5
@@ -130,7 +119,7 @@ is in [upgrade.md](../upgrade.md). Below, `$OLD` and `$NEW` are the pkgs refs of
     Expected: `VALIDATION PASSED`, a release tagged `vX.Y.Z-1` and three OCI tags. A red run published
     nothing. Fix it on a branch and merge again.
 
-11. Upgrade one worker, not a control plane node:
+10. Upgrade one worker, not a control plane node:
 
     ```
     talosctl upgrade --nodes <worker> --image ghcr.io/yama6a/talos-raspberry-pi5:vX.Y.Z-1
@@ -143,7 +132,7 @@ is in [upgrade.md](../upgrade.md). Below, `$OLD` and `$NEW` are the pkgs refs of
     Then attach a Longhorn volume to a pod pinned to that node and write to it. Only then upgrade the other
     workers, then the control plane nodes one at a time.
 
-12. Roll back if the node misbehaves:
+11. Roll back if the node misbehaves:
 
     ```
     talosctl -n <worker> rollback
