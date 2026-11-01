@@ -141,6 +141,7 @@ list_changes() {
       return 0
     }
   CHANGES="$(printf '%s' "$compare" | jq -r '.commits[]?.commit.message | split("\n")[0] | "- " + .')"
+  [ -n "$CHANGES" ] || CHANGES="No repository changes. This build picked up a newer upstream input, listed below."
 }
 
 write_release_notes() {
