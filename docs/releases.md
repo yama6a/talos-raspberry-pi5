@@ -58,6 +58,8 @@ Each build pushes three OCI tags and one GitHub release. The GitHub release uses
 | `kernel-config-arm64.base` | siderolabs/pkgs' stock arm64 kernel config |
 | `kernel-config-arm64.fragment` | the Pi 5 fragment layered over it |
 
+- The release notes list every commit since the newest earlier release, of any Talos version. A squash merge
+  keeps its PR number, so each change links to its pull request.
 - The two config halves plus `make olddefconfig` state exactly what was compiled. The reconciled `.config`
   exists only inside a build stage that ships nothing.
 - CI signs a build-provenance attestation for the image and the raw disk image. The image's attestation sits

@@ -9,7 +9,9 @@ source "${SCRIPT_DIR}/common.sh"
 # ---- state ----
 # No GHCR_USER here: it may come from the environment, and an empty default would always lose to the fallback.
 RELEASE_TAG="" # set by resolve_build_revision
-CREATED=""     # set by stage_assets
+PREV_TAG=""
+CHANGES="" # set by list_changes
+CREATED="" # set by stage_assets
 REPO_URL=""
 DIGEST="" # set by push_installer
 
@@ -38,6 +40,9 @@ resolve_build_revision() {
     '[.[]?.tag_name // empty | select(startswith($t + "-")) | ltrimstr($t + "-")
       | select(test("^[0-9]+$")) | tonumber] | max // 0' 2> /dev/null || echo 0)"
   [ -n "$existing" ] || existing=0
+  # Any Talos version, and pre-releases too: the notes list what changed since the newest published build.
+  PREV_TAG="$(printf '%s' "$releases" | jq -r \
+    '[.[]? | select(.draft | not)] | sort_by(.created_at) | last | .tag_name // ""' 2> /dev/null || true)"
   revision=$((existing + 1))
   RELEASE_TAG="${TALOS_VERSION}-${revision}"
   if [ "$existing" -eq 0 ]; then
@@ -122,8 +127,24 @@ push_installer() {
   DIGEST="$(docker buildx imagetools inspect "${IMAGE_REPO}:${RELEASE_TAG}" --format '{{.Manifest.Digest}}')"
 }
 
+# A squash merge keeps the PR number in the commit subject, and GitHub links each (#N) in a release body. A
+# failed lookup leaves the list out rather than failing a release whose image is already pushed.
+list_changes() {
+  local auth=() head compare
+  [ -n "$PREV_TAG" ] || return 0
+  [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  head="${GITHUB_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD)}"
+  compare="$(curl -fsSL --retry 3 ${auth[@]+"${auth[@]}"} \
+    "https://api.github.com/repos/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${head}" 2> /dev/null)" \
+    || {
+      warn "cannot compare ${PREV_TAG}...${head}, so the release notes list no changes"
+      return 0
+    }
+  CHANGES="$(printf '%s' "$compare" | jq -r '.commits[]?.commit.message | split("\n")[0] | "- " + .')"
+}
+
 write_release_notes() {
-  local image_sha skipped added added_row f s kernel_commit_short kernel_url overlay_short overlay_url
+  local image_sha skipped added added_row changes_section f s kernel_commit_short kernel_url overlay_short overlay_url
   image_sha="$(sha256hex "$IMAGE_FILE")"
   # Not inlined below: backticks in a command substitution inside an unquoted heredoc are not portable.
   skipped="$(grep -vE '^[[:space:]]*(#|$)' "${REPO_ROOT}/kernel/patch-skip.txt" | sed 's/^/`/;s/$/`/' | paste -sd' ' -)"
@@ -138,6 +159,8 @@ write_release_notes() {
   done
   added_row=""
   [ -n "$added" ] && added_row=$'\n'"| Added kernel patches | ${added} |"
+  changes_section=""
+  [ -n "$CHANGES" ] && changes_section=$'\n'"## Changes since ${PREV_TAG}"$'\n\n'"${CHANGES}"$'\n'
   kernel_commit_short="${KERNEL_COMMIT:0:12}"
   kernel_url="$(jq -r '.kernel_url' "$INPUTS_FILE")"
   overlay_short="${SBCOVERLAY_VERSION:0:12}"
@@ -159,7 +182,7 @@ talosctl upgrade --nodes <node-ip> --image ${IMAGE_REPO}:${RELEASE_TAG}
 \`\`\`
 
 Pin \`${IMAGE_REPO}:${TALOS_VERSION}@${DIGEST}\` to track rebuilds of this Talos version by digest.
-
+${changes_section}
 ## What went into it
 
 | Input | Pinned at |
@@ -206,6 +229,7 @@ assert_ghcr_token
 resolve_build_revision
 stage_assets
 push_installer
+list_changes
 write_release_notes
 write_release_env
 print_result
