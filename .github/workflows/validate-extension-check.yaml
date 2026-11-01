@@ -1,0 +1,65 @@
+# Temporary, delete before merging #65. Proves check_extension_libraries on this branch: it passes on the
+# release's extension digests and fails on the iscsi-tools build that v1.14.5-2 shipped. Publishes nothing.
+name: validate-extension-check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.head_ref == 'check-extension-libraries'
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: release-digests
+            expect: pass
+            iscsi: ""
+          - case: v1.14.5-2-iscsi-tools
+            expect: fail
+            iscsi: ghcr.io/siderolabs/iscsi-tools:v0.2.0@sha256:c1eca91fb4458ce0c50e6e36968b325ab5b3e5a554b3ad0426795efec4f2a3d5
+    name: validate (${{ matrix.case }})
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PRUNE_BUILD_CACHE: "true"
+      ISCSI_OVERRIDE: ${{ matrix.iscsi }}
+      EXPECT: ${{ matrix.expect }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: resolve inputs
+        run: make resolve
+
+      - name: swap in the broken iscsi-tools build
+        if: matrix.iscsi != ''
+        run: |
+          jq --arg r "$ISCSI_OVERRIDE" '.iscsi_ext = $r' .cache/build-inputs.json > inputs.json
+          mv inputs.json .cache/build-inputs.json
+
+      - name: free disk
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
+
+      - name: install crane
+        run: |
+          curl -fsSL https://github.com/google/go-containerregistry/releases/download/v0.21.8/go-containerregistry_Linux_arm64.tar.gz \
+            | tar xz crane
+          sudo mv crane /usr/local/bin/ && crane version
+
+      # Not `make build`: that target re-runs resolve and would undo the swap above.
+      - name: build
+        run: bash lib/build.sh
+
+      - name: validate
+        run: |
+          set +e
+          bash lib/validate.sh 2>&1 | tee validate.log
+          rc=${PIPESTATUS[0]}
+          if [ "$EXPECT" = pass ]; then exit "$rc"; fi
+          [ "$rc" -ne 0 ] && grep -q 'needs libcrypto.so.4' validate.log \
+            && echo "failed as expected, on libcrypto.so.4"
