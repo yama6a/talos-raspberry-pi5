@@ -14,7 +14,9 @@ MIN_BYTES=50000000         # a plausible compressed image is between these two
 MAX_BYTES=600000000
 
 # ---- state ----
-UKI_DIR="" # set by extract_uki, read by check_kernel_and_extensions and check_extension_libraries
+UKI_DIR="" # set by extract_uki, read by check_kernel_and_extensions
+# Talos's own initramfs before the imager adds extensions. zstd despite the name. Set after load_inputs.
+BASE_INITRAMFS=""
 
 # ---- functions ----
 
@@ -78,7 +80,6 @@ for i in range(nsec):
 for s in (".uname",".initrd"):
     o,z=sec[s]; open("/tmp/"+s,"wb").write(d[o:o+z])
 PY
-  cp /tmp/.initrd /w/initrd
   uname=$(cat /tmp/.uname)
   case "$uname" in "$WANT"*) echo "  kernel $uname";; *) echo "  FAILED kernel $uname, expected $WANT*"; exit 1;; esac
   [ "$uname" = "$KVER" ] && echo "  UKI label matches the built kernel ($KVER)" \
@@ -95,33 +96,37 @@ PY
 
 # An extension tag can point at a build for a newer Talos, linked against libraries this rootfs lacks. Talos
 # then fails the extension's service on the node, so every library an extension binary needs must come from
-# the rootfs or from an extension. The initrd holds the rootfs and each extension as a squashfs image. They are
-# found by their superblocks, not through the cpio archives, and the largest image is the rootfs.
+# the rootfs or from an extension. The rootfs comes from the base initramfs the imager consumed, the extensions
+# from their pinned images. -no-xattrs, because unsquashfs rejects the xattr table of Talos's labeled rootfs.
 check_extension_libraries() {
-  if docker run --rm -v "$UKI_DIR:/w" "$ALPINE_IMAGE" sh -c '
-  set -e; apk add -q python3 squashfs-tools binutils >/dev/null 2>&1; mkdir -p /x
-  python3 - > /x.offsets <<PY
-import struct
-d=open("/w/initrd","rb").read(); o=0; found=[]
-while (o:=d.find(b"hsqs",o)) >= 0:
-    comp,=struct.unpack_from("<H",d,o+20); ver=struct.unpack_from("<HH",d,o+28); used,=struct.unpack_from("<Q",d,o+40)
-    if ver==(4,0) and 1<=comp<=6 and o+used<=len(d): found.append((used,o))
-    o+=4
-for i,(used,o) in enumerate(sorted(found,reverse=True)): print(o, "rootfs" if i==0 else "ext%d" % i)
-PY
-  [ "$(wc -l < /x.offsets)" -ge 2 ] || { echo "  FAILED fewer than two squashfs images in the initrd"; exit 1; }
-  while read -r off name; do unsquashfs -q -n -o "$off" -d "/x/$name" /w/initrd >/dev/null; done < /x.offsets
-  find /x -name "*.so*" \( -type f -o -type l \) -exec basename {} \; | sort -u > /x.libs
+  local ext_dir="${BUILD_DIR}/extensions" ref
+  if [ ! -f "$BASE_INITRAMFS" ]; then
+    bad "missing ${BASE_INITRAMFS}, the base initramfs the build makes"
+    return 0
+  fi
+  rm -rf "$ext_dir"
+  for ref in "$ISCSI_EXT" "$UTIL_EXT"; do
+    mkdir -p "${ext_dir}/${ref##*/}"
+    if ! crane export --platform linux/arm64 "$ref" - | tar -x -C "${ext_dir}/${ref##*/}"; then
+      bad "cannot export ${ref}"
+      return 0
+    fi
+  done
+  if docker run --rm -v "${BASE_INITRAMFS}:/initramfs.zst:ro" -v "${ext_dir}:/ext:ro" "$ALPINE_IMAGE" sh -c '
+  set -e; apk add -q zstd cpio squashfs-tools binutils >/dev/null 2>&1
+  mkdir -p /base && cd /base && zstd -dc /initramfs.zst | cpio -id --quiet rootfs.sqsh
+  unsquashfs -q -n -no-xattrs -d /rootfs /base/rootfs.sqsh >/dev/null
+  find /rootfs /ext -name "*.so*" \( -type f -o -type l \) -exec basename {} \; | sort -u > /libs
   fail=0; bins=0
-  for f in $(find /x -path /x/rootfs -prune -o -type f -print); do
+  for f in $(find /ext -type f); do
     readelf -h "$f" >/dev/null 2>&1 || continue
     bins=$((bins + 1))
     for lib in $(readelf -d "$f" 2>/dev/null | sed -n "s/.*(NEEDED).*\[\(.*\)\]/\1/p"); do
-      grep -qxF "$lib" /x.libs || { echo "  FAILED ${f#/x/} needs $lib, which neither the rootfs nor an extension ships"; fail=1; }
+      grep -qxF "$lib" /libs || { echo "  FAILED ${f#/ext/} needs $lib, which neither the rootfs nor an extension ships"; fail=1; }
     done
   done
   [ "$bins" -gt 0 ] || { echo "  FAILED no ELF files in the extensions"; exit 1; }
-  echo "  $(($(wc -l < /x.offsets) - 1)) extensions, $bins ELF files checked"
+  echo "  $bins extension ELF files checked against the rootfs"
   exit $fail
 '; then
     ok "extensions: every library their binaries need is in the image"
@@ -139,8 +144,9 @@ print_result() {
 
 # ---- main ----
 
-require docker jq
+require docker jq crane
 load_inputs
+BASE_INITRAMFS="${BUILD_DIR}/checkouts/talos/_out/initramfs-arm64.xz"
 load_meta
 assert_image_built
 
