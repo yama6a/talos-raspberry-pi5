@@ -15,7 +15,7 @@ The checklist for a Talos minor or major is in the [upgrade runbook](runbooks/up
 | stock kernel config | `config-arm64` at that pkgs commit | move a symbol `kernel/pi5-rpi.fragment` asserts |
 | overlay machinery API | `pkg/machinery` at `TALOS_VERSION` | change `overlay.Options`, `InstallOptions` or the adapter signature, so REBASE 3 stops compiling |
 | imager and installer | Talos's own Makefile, driven by `build/Makefile.talos` | rename a target, drop a flag, change the boot layout or the cmdline source |
-| extensions | digest pins in `versions.env` | tighten the `compatibility.talos.version` constraint |
+| extensions | derived from `ghcr.io/siderolabs/extensions:<TALOS_VERSION>`, the digests siderolabs built for that release | none. A newer build of the same extension tag can need libraries the release lacks, which is why nothing else pins them |
 | machine config defaults | the user's config, nothing here | deprecate v1alpha1 fields, remove `talosctl` flags, add documents to `gen config` |
 | the upgrade flow | the node's `machined` running the new installer | change how the installer runs, what it keeps, how it rebuilds the cmdline |
 
