@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Checks the built image offline: partition layout, Pi 5 boot bits, kernel label, baked extensions.
+# Checks the built image offline: partition layout, Pi 5 boot bits, kernel label, baked extensions and the
+# libraries their binaries need.
 # No `set -e`, so every check runs and the summary lists all failures.
 set -uo pipefail
 
@@ -14,6 +15,8 @@ MAX_BYTES=600000000
 
 # ---- state ----
 UKI_DIR="" # set by extract_uki, read by check_kernel_and_extensions
+# Talos's own initramfs before the imager adds extensions. zstd despite the name. Set after load_inputs.
+BASE_INITRAMFS=""
 
 # ---- functions ----
 
@@ -91,6 +94,47 @@ PY
   fi
 }
 
+# An extension tag can point at a build for a newer Talos, linked against libraries this rootfs lacks. Talos
+# then fails the extension's service on the node, so every library an extension binary needs must come from
+# the rootfs or from an extension. The rootfs comes from the base initramfs the imager consumed, the extensions
+# from their pinned images. -no-xattrs, because unsquashfs rejects the xattr table of Talos's labeled rootfs.
+check_extension_libraries() {
+  local ext_dir="${BUILD_DIR}/extensions" ref
+  if [ ! -f "$BASE_INITRAMFS" ]; then
+    bad "missing ${BASE_INITRAMFS}, the base initramfs the build makes"
+    return 0
+  fi
+  rm -rf "$ext_dir"
+  for ref in "$ISCSI_EXT" "$UTIL_EXT"; do
+    mkdir -p "${ext_dir}/${ref##*/}"
+    if ! crane export --platform linux/arm64 "$ref" - | tar -x -C "${ext_dir}/${ref##*/}"; then
+      bad "cannot export ${ref}"
+      return 0
+    fi
+  done
+  if docker run --rm -v "${BASE_INITRAMFS}:/initramfs.zst:ro" -v "${ext_dir}:/ext:ro" "$ALPINE_IMAGE" sh -c '
+  set -e; apk add -q zstd cpio squashfs-tools binutils >/dev/null 2>&1
+  mkdir -p /base && cd /base && zstd -dc /initramfs.zst | cpio -id --quiet rootfs.sqsh
+  unsquashfs -q -n -no-xattrs -d /rootfs /base/rootfs.sqsh >/dev/null
+  find /rootfs /ext -name "*.so*" \( -type f -o -type l \) -exec basename {} \; | sort -u > /libs
+  fail=0; bins=0
+  for f in $(find /ext -type f); do
+    readelf -h "$f" >/dev/null 2>&1 || continue
+    bins=$((bins + 1))
+    for lib in $(readelf -d "$f" 2>/dev/null | sed -n "s/.*(NEEDED).*\[\(.*\)\]/\1/p"); do
+      grep -qxF "$lib" /libs || { echo "  FAILED ${f#/ext/} needs $lib, which neither the rootfs nor an extension ships"; fail=1; }
+    done
+  done
+  [ "$bins" -gt 0 ] || { echo "  FAILED no ELF files in the extensions"; exit 1; }
+  echo "  $bins extension ELF files checked against the rootfs"
+  exit $fail
+'; then
+    ok "extensions: every library their binaries need is in the image"
+  else
+    bad "extension library check failed (see above)"
+  fi
+}
+
 print_result() {
   say "VALIDATION PASSED"
   echo "   image:     ${IMAGE_FILE}"
@@ -100,8 +144,9 @@ print_result() {
 
 # ---- main ----
 
-require docker jq
+require docker jq crane
 load_inputs
+BASE_INITRAMFS="${BUILD_DIR}/checkouts/talos/_out/initramfs-arm64.xz"
 load_meta
 assert_image_built
 
@@ -109,6 +154,7 @@ say "OFFLINE VALIDATION"
 extract_uki
 check_raw_image
 check_kernel_and_extensions
+check_extension_libraries
 
 summary || die "VALIDATION FAILED"
 print_result

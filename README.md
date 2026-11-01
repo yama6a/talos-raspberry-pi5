@@ -58,7 +58,7 @@ talosctl upgrade --nodes <node-ip> --image ghcr.io/yama6a/talos-raspberry-pi5:vX
 ```
 make preflight  # checkouts, pkg.yaml rewrites and the overlay port, no Docker
 make build      # about 40 min cold on an M2 Pro, about 8 with a kernel cache hit
-make validate   # partition layout, Pi 5 boot bits, kernel label, baked extensions
+make validate   # partition layout, Pi 5 boot bits, kernel label, extensions and their libraries
 ```
 
 - Needs an arm64 host, Docker with about 60 GB free, GNU make 4 or later, and
