@@ -255,6 +255,7 @@ fetch_kernel_source
 serve_kernel_source
 point_pkgs_at_rpi_kernel "$SRCSERVER_PORT"
 stage_kernel_config
+stage_local_kernel_patches
 gate_kernel_patches
 inject_config_merge
 

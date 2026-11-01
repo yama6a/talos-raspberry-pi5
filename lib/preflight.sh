@@ -21,7 +21,8 @@ GMAKE=""    # set by setup_gmake
 TALOS_MK="" # set by derive_paths, after load_inputs supplies BUILD_DIR
 CHK=""
 PKGS_PATCH_SKIP=""
-SRCDIR="" # set by fetch_kernel_source
+LOCAL_PATCH_SLUGS="" # set by derive_paths, one slug per kernel/patches/*.patch
+SRCDIR=""            # set by fetch_kernel_source
 KSHA256=""
 KSHA512=""
 BAKEINS="" # set by stage_kernel_config
@@ -30,6 +31,12 @@ derive_paths() {
   TALOS_MK="${REPO_ROOT}/build/Makefile.talos"
   CHK="${BUILD_DIR}/checkouts"
   PKGS_PATCH_SKIP="$(grep -vE '^[[:space:]]*(#|$)' "${REPO_ROOT}/kernel/patch-skip.txt")"
+  LOCAL_PATCH_SLUGS="$(for f in "${REPO_ROOT}/kernel/patches"/*.patch; do
+    [ -e "$f" ] || continue
+    s="$(basename "$f" .patch)"
+    case "$s" in [0-9]*-*) s="${s#*-}" ;; esac
+    printf '%s\n' "$s"
+  done)"
 }
 
 # The upstream Makefiles need GNU make >= 4 and recurse into $(MAKE), so its dir goes first on PATH.
@@ -113,13 +120,25 @@ stage_kernel_config() {
   BAKEINS="$(grep -oE '^CONFIG_[A-Z0-9_]+=[ym]' "${REPO_ROOT}/kernel/pi5-rpi.fragment" | tr '\n' ' ')"
 }
 
+# Add the rpi-tree fixes in kernel/patches to pkgs' patch dir. pkgs applies that dir in sorted order, so the 9
+# prefix puts ours after its own, behind the same dry-run gate.
+stage_local_kernel_patches() {
+  local f
+  for f in "${REPO_ROOT}/kernel/patches"/*.patch; do
+    [ -e "$f" ] || continue
+    cp "$f" "$CHK/pkgs/kernel/build/patches/9$(basename "$f")"
+  done
+}
+
 # pkgs' kernel patches target vanilla kernel.org; we build raspberrypi/linux, where some are already merged or
 # collide. Gate each on a dry-run: apply what applies, skip only what patch-skip.txt names, fail on anything
-# else, so a pkgs bump that adds a patch we cannot apply stops the build instead of dropping a fix.
+# else, so a pkgs bump that adds a patch we cannot apply stops the build instead of dropping a fix. A patch from
+# kernel/patches is never skipped: it fails the build when it stops applying.
 gate_kernel_patches() {
-  python3 - "$CHK/pkgs/kernel/build/pkg.yaml" "$(printf '%s' "$PKGS_PATCH_SKIP" | tr '\n' ' ')" << 'PY'
+  python3 - "$CHK/pkgs/kernel/build/pkg.yaml" "$(printf '%s' "$PKGS_PATCH_SKIP" | tr '\n' ' ')" \
+    "$(printf '%s' "$LOCAL_PATCH_SLUGS" | tr '\n' ' ')" << 'PY'
 import sys
-p,skip=sys.argv[1],sys.argv[2].strip()
+p,skip,local=sys.argv[1],sys.argv[2].strip(),sys.argv[3].strip()
 s=open(p).read()
 anchor='''          patch -p1 < $patch || (echo "Failed to apply patch $patch" && exit 1)
           echo "Applied patch $patch"
@@ -128,6 +147,11 @@ block=f'''          slug=$(basename $patch .patch); case "$slug" in [0-9]*-*) sl
           if patch -p1 -N --dry-run --silent < $patch >/dev/null 2>&1; then
             patch -p1 -N < $patch
             echo "Applied patch $slug"
+          elif echo "{local}" | tr ' ' '\\n' | grep -qxF "$slug"; then
+            echo "FAILED: kernel/patches patch does not apply to raspberrypi/linux: $slug"
+            echo "  rebase it onto the kernel commit in .cache/build-inputs.json, or drop it if the rpi tree has it now"
+            echo "  rejects: /src/**/*.rej"
+            exit 1
           elif echo "{skip}" | tr ' ' '\\n' | grep -qxF "$slug"; then
             echo "Skipped patch $slug (kernel/patch-skip.txt)"
           else
@@ -221,6 +245,7 @@ preflight_main() {
   # because they are pure file edits and cost nothing.
   say "checking the rewrites the build makes to upstream files still have their anchors"
   stage_kernel_config
+  stage_local_kernel_patches
   gate_kernel_patches
   inject_config_merge
   echo "   kernel/build/pkg.yaml took both rewrites"
