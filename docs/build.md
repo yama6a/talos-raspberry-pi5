@@ -107,5 +107,7 @@ Offline, no hardware. The checks run in a Linux container, because macOS cannot 
   and both `.dtbo` overlays.
 - The installer UKI's `.uname` equals the kernel that was compiled.
 - The UKI's initrd holds both extensions.
+- Every library an extension binary needs is in the rootfs or in an extension. An extension tag can point at a
+  build for a newer Talos, and on a node its service then fails to start.
 
 None of this proves the Pi 5 boot chain works. Only booting a board does.

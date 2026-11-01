@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Checks the built image offline: partition layout, Pi 5 boot bits, kernel label, baked extensions.
+# Checks the built image offline: partition layout, Pi 5 boot bits, kernel label, baked extensions and the
+# libraries their binaries need.
 # No `set -e`, so every check runs and the summary lists all failures.
 set -uo pipefail
 
@@ -13,7 +14,7 @@ MIN_BYTES=50000000         # a plausible compressed image is between these two
 MAX_BYTES=600000000
 
 # ---- state ----
-UKI_DIR="" # set by extract_uki, read by check_kernel_and_extensions
+UKI_DIR="" # set by extract_uki, read by check_kernel_and_extensions and check_extension_libraries
 
 # ---- functions ----
 
@@ -77,6 +78,7 @@ for i in range(nsec):
 for s in (".uname",".initrd"):
     o,z=sec[s]; open("/tmp/"+s,"wb").write(d[o:o+z])
 PY
+  cp /tmp/.initrd /w/initrd
   uname=$(cat /tmp/.uname)
   case "$uname" in "$WANT"*) echo "  kernel $uname";; *) echo "  FAILED kernel $uname, expected $WANT*"; exit 1;; esac
   [ "$uname" = "$KVER" ] && echo "  UKI label matches the built kernel ($KVER)" \
@@ -88,6 +90,43 @@ PY
     ok "installer: kernel label matches the built kernel, both extensions baked in"
   else
     bad "installer/kernel validation failed (see above)"
+  fi
+}
+
+# An extension tag can point at a build for a newer Talos, linked against libraries this rootfs lacks. Talos
+# then fails the extension's service on the node, so every library an extension binary needs must come from
+# the rootfs or from an extension. The initrd holds the rootfs and each extension as a squashfs image. They are
+# found by their superblocks, not through the cpio archives, and the largest image is the rootfs.
+check_extension_libraries() {
+  if docker run --rm -v "$UKI_DIR:/w" "$ALPINE_IMAGE" sh -c '
+  set -e; apk add -q python3 squashfs-tools binutils >/dev/null 2>&1; mkdir -p /x
+  python3 - > /x.offsets <<PY
+import struct
+d=open("/w/initrd","rb").read(); o=0; found=[]
+while (o:=d.find(b"hsqs",o)) >= 0:
+    comp,=struct.unpack_from("<H",d,o+20); ver=struct.unpack_from("<HH",d,o+28); used,=struct.unpack_from("<Q",d,o+40)
+    if ver==(4,0) and 1<=comp<=6 and o+used<=len(d): found.append((used,o))
+    o+=4
+for i,(used,o) in enumerate(sorted(found,reverse=True)): print(o, "rootfs" if i==0 else "ext%d" % i)
+PY
+  [ "$(wc -l < /x.offsets)" -ge 2 ] || { echo "  FAILED fewer than two squashfs images in the initrd"; exit 1; }
+  while read -r off name; do unsquashfs -q -n -o "$off" -d "/x/$name" /w/initrd >/dev/null; done < /x.offsets
+  find /x -name "*.so*" \( -type f -o -type l \) -exec basename {} \; | sort -u > /x.libs
+  fail=0; bins=0
+  for f in $(find /x -path /x/rootfs -prune -o -type f -print); do
+    readelf -h "$f" >/dev/null 2>&1 || continue
+    bins=$((bins + 1))
+    for lib in $(readelf -d "$f" 2>/dev/null | sed -n "s/.*(NEEDED).*\[\(.*\)\]/\1/p"); do
+      grep -qxF "$lib" /x.libs || { echo "  FAILED ${f#/x/} needs $lib, which neither the rootfs nor an extension ships"; fail=1; }
+    done
+  done
+  [ "$bins" -gt 0 ] || { echo "  FAILED no ELF files in the extensions"; exit 1; }
+  echo "  $(($(wc -l < /x.offsets) - 1)) extensions, $bins ELF files checked"
+  exit $fail
+'; then
+    ok "extensions: every library their binaries need is in the image"
+  else
+    bad "extension library check failed (see above)"
   fi
 }
 
@@ -109,6 +148,7 @@ say "OFFLINE VALIDATION"
 extract_uki
 check_raw_image
 check_kernel_and_extensions
+check_extension_libraries
 
 summary || die "VALIDATION FAILED"
 print_result

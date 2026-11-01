@@ -20,7 +20,7 @@ build: resolve ## Build the kernel, overlay, installer and raw disk image. Long:
 	bash lib/build.sh
 
 .PHONY: validate
-validate: ## Check the built image offline: partition layout, Pi 5 boot bits, kernel label, baked extensions.
+validate: ## Check the built image offline: partition layout, Pi 5 boot bits, kernel label, baked extensions and their libraries.
 	bash lib/validate.sh
 
 .PHONY: publish
