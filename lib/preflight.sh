@@ -131,42 +131,25 @@ stage_local_kernel_patches() {
 }
 
 # pkgs' kernel patches target vanilla kernel.org; we build raspberrypi/linux, where some are already merged or
-# collide. Gate each on a dry-run: apply what applies, skip only what patch-skip.txt names, fail on anything
-# else, so a pkgs bump that adds a patch we cannot apply stops the build instead of dropping a fix. A patch from
-# kernel/patches is never skipped: it fails the build when it stops applying.
+# collide. Run each through lib/patch_gate.sh, so a pkgs bump that adds a patch we cannot apply stops the build
+# instead of dropping a fix.
 gate_kernel_patches() {
-  python3 - "$CHK/pkgs/kernel/build/pkg.yaml" "$(printf '%s' "$PKGS_PATCH_SKIP" | tr '\n' ' ')" \
-    "$(printf '%s' "$LOCAL_PATCH_SLUGS" | tr '\n' ' ')" << 'PY'
+  cp "${_PREFLIGHT_DIR}/patch_gate.sh" "$CHK/pkgs/kernel/build/patch_gate.sh"
+  python3 - "$CHK/pkgs/kernel/build/pkg.yaml" "$(space_list "$PKGS_PATCH_SKIP")" "$(space_list "$LOCAL_PATCH_SLUGS")" << 'PY'
 import sys
-p,skip,local=sys.argv[1],sys.argv[2].strip(),sys.argv[3].strip()
+p,skip,local=sys.argv[1],sys.argv[2],sys.argv[3]
 s=open(p).read()
 anchor='''          patch -p1 < $patch || (echo "Failed to apply patch $patch" && exit 1)
           echo "Applied patch $patch"
 '''
-block=f'''          slug=$(basename $patch .patch); case "$slug" in [0-9]*-*) slug=${{slug#*-}} ;; esac
-          if patch -p1 -N --dry-run --silent < $patch >/dev/null 2>&1; then
-            patch -p1 -N < $patch
-            echo "Applied patch $slug"
-          elif echo "{local}" | tr ' ' '\\n' | grep -qxF "$slug"; then
-            echo "FAILED: kernel/patches patch does not apply to raspberrypi/linux: $slug"
-            echo "  rebase it onto the kernel commit in .cache/build-inputs.json, or drop it if the rpi tree has it now"
-            echo "  rejects: /src/**/*.rej"
-            exit 1
-          elif echo "{skip}" | tr ' ' '\\n' | grep -qxF "$slug"; then
-            echo "Skipped patch $slug (kernel/patch-skip.txt)"
-          else
-            echo "FAILED: pkgs patch does not apply to raspberrypi/linux: $slug"
-            echo "  pkgs patches target kernel.org, we build the rpi fork, so collisions are expected"
-            echo "  fix already in the rpi tree -> add '$slug' to kernel/patch-skip.txt"
-            echo "  fix genuinely missing       -> rebase the patch onto the rpi tree, or skip it deliberately"
-            echo "  rejects: /src/**/*.rej"
-            exit 1
-          fi
+block=f'''          bash /pkg/patch_gate.sh "$patch" "{skip}" "{local}"
 '''
 assert anchor in s, "kernel/build/pkg.yaml patch loop not found (upstream changed?)"
 open(p,"w").write(s.replace(anchor, block, 1))
 PY
 }
+
+space_list() { printf '%s' "$1" | tr '\n' ' ' | sed 's/ *$//'; }
 
 # Merge the fragment, reconcile with olddefconfig, then verify every bake-in before compiling, so an unmet
 # dependency fails in seconds rather than after a 40-minute build.

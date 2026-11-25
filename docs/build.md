@@ -79,9 +79,9 @@ anchor it edits and fails naming what upstream moved.
 
 - pkgs writes its kernel patches against vanilla kernel.org. Some are already in `raspberrypi/linux`, or
   collide with the fork's own fix for the same bug.
-- The build dry-runs each patch. It applies what applies, skips only the slugs in `kernel/patch-skip.txt`,
-  and fails on anything else. So a pkgs bump that adds a patch this build cannot apply stops the build and
-  does not drop the fix.
+- `lib/patch_gate.sh` dry-runs each patch. It applies what applies, skips only the slugs in
+  `kernel/patch-skip.txt`, and fails on anything else. So a pkgs bump that adds a patch this build cannot
+  apply stops the build and does not drop the fix.
 - A slug is the patch filename without its `NNNN-` prefix, because pkgs renumbers its files. A slug that
   matches no patch fails the build before the kernel download.
 - To re-check the skip list after a pkgs bump, see the [build runbook](runbooks/build.md#re-check-the-patch-skip-list).

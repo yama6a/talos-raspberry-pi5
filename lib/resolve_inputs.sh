@@ -15,7 +15,7 @@ FW_CHANNELS="master stable next oldstable" # raspberrypi/firmware refs to try fi
 FW_HISTORY_PAGE=100                        # failsafe: how far back to walk master's extra/git_hash history
 LINUX_WALK_MAX=200                         # last resort: how many first-parent commits of rpi-X.Y.y to inspect
 # Only files that can change the image. Editing one, comments included, cuts a new build revision.
-RECIPE_FILES="lib/build.sh lib/preflight.sh build/Makefile.talos kernel/pi5-rpi.fragment kernel/patch-skip.txt"
+RECIPE_FILES="lib/build.sh lib/preflight.sh lib/patch_gate.sh build/Makefile.talos kernel/pi5-rpi.fragment kernel/patch-skip.txt"
 
 # ---- state ----
 AUTH=()      # set by use_github_token, read by get
