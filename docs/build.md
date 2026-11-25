@@ -75,6 +75,10 @@ anchor it edits and fails naming what upstream moved.
 3. **Overlay port.** The community overlay targets older Talos machinery. The build bumps its machinery
    dependency and patches `main.go` so it compiles.
 
+- The Go module `github.com/ONSdigital/dp-mocking` is gone from GitHub and proxy.golang.org. Talos's tools
+  module still needs it indirectly, so Talos's `go mod download` fails. The build adds a `go.work` replace
+  that points it at a stub holding only a `go.mod`. Nothing the build compiles imports it.
+- `stub_dp_mocking` fails once Talos no longer pins `dp-api-clients-go/v2 v2.282.0`. Delete the stub then.
 - The Talos checkout edits are marked `assume-unchanged`. A dirty tree would stamp `-dirty` onto the OS
   version, and `talosctl` would then call a clean release "older than client".
 

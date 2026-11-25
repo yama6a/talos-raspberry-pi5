@@ -209,6 +209,29 @@ dockerfile_frontend_ref() {
   printf '%s' "$upstream"
 }
 
+# A modified file makes `git describe --dirty` report `-dirty`, and that string stamps the OS version
+# (--build-arg=TAG), so nodes would report <version>-dirty and a clean talosctl would call it "older than
+# client" (semver ranks a -dirty prerelease below the clean release). assume-unchanged keeps describe clean
+# while the modified content still feeds the build. Idempotent across re-runs.
+keep_describe_clean() {
+  git -C "$CHK/talos" update-index --assume-unchanged "$1"
+}
+
+# github.com/ONSdigital/dp-mocking is gone from GitHub and from proxy.golang.org, so Talos's `go mod download`
+# fails. Talos needs it only through its tools module: dis-vulncheck needs dp-api-clients-go/v2 v2.282.0, which
+# needs dp-mocking. Nothing the build compiles imports it, so a stub that holds only a go.mod completes the
+# module graph. The stub sits under tools/ because the build-go stage copies only go.mod, go.sum, go.work,
+# pkg/machinery's module files and tools/.
+stub_dp_mocking() {
+  local talos="$CHK/talos"
+  grep -qF 'github.com/ONSdigital/dp-api-clients-go/v2 v2.282.0' "$talos/tools/go.mod" \
+    || die "Talos ${TALOS_VERSION} no longer pins dp-api-clients-go/v2 v2.282.0. If 'go mod download' in its checkout passes without the dp-mocking stub, delete stub_dp_mocking"
+  mkdir -p "$talos/tools/dp-mocking-stub"
+  printf 'module github.com/ONSdigital/dp-mocking\n\ngo 1.21\n' > "$talos/tools/dp-mocking-stub/go.mod"
+  printf '\nreplace github.com/ONSdigital/dp-mocking => ./tools/dp-mocking-stub\n' >> "$talos/go.work"
+  keep_describe_clean go.work
+}
+
 # The overlay copies u-boot, config.txt and the dtbs onto the EFI partition. It targets older machinery, and a
 # newer Talos's overlay API added a ctx argument to every method, so it will not compile as-is.
 port_overlay_to_machinery() {
@@ -257,6 +280,7 @@ preflight_main() {
   inject_config_merge
   echo "   kernel/build/pkg.yaml took both rewrites"
   dockerfile_frontend_ref > /dev/null && echo "   talos Dockerfile still declares a '# syntax =' frontend"
+  stub_dp_mocking && echo "   talos tools still pins the dp-api-clients-go that needs the dp-mocking stub"
 
   say "replaying the kernel patches on the files they touch in raspberrypi/linux ${KERNEL_COMMIT:0:12}"
   replay_kernel_patches

@@ -152,14 +152,6 @@ filter_module_list() {
   echo "   modules list pinned to kernel ${KVER}"
 }
 
-# A modified file makes `git describe --dirty` report `-dirty`, and that string stamps the OS version
-# (--build-arg=TAG), so nodes would report <version>-dirty and a clean talosctl would call it "older than
-# client" (semver ranks a -dirty prerelease below the clean release). assume-unchanged keeps describe clean
-# while the modified content still feeds the build. Idempotent across re-runs.
-keep_describe_clean() {
-  git -C "$CHK/talos" update-index --assume-unchanged "$1"
-}
-
 # Both halves rather than a reconciled dump: the reconciled .config only exists inside a build stage that
 # ships nothing, and `stock + fragment + olddefconfig` is the complete statement of what was compiled anyway.
 stage_kernel_config_assets() {
@@ -268,6 +260,7 @@ stage_kernel_config_assets
 
 port_overlay_to_machinery
 build_overlay
+stub_dp_mocking
 mirror_dockerfile_frontend
 build_installer_and_image
 
