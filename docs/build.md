@@ -7,7 +7,7 @@ Procedures, prerequisites and troubleshooting are in the [build runbook](runbook
 | Target | Script | Does |
 |---|---|---|
 | `make resolve` | `lib/resolve_inputs.sh` | HTTP only. Writes `.cache/build-inputs.json` |
-| `make preflight` | `lib/preflight.sh` | the checks that need no Docker and no kernel |
+| `make preflight` | `lib/preflight.sh` | the checks that need no Docker and no kernel tarball |
 | `make build` | `lib/build.sh` | checkouts, three rebases, kernel, overlay, installer, raw image |
 | `make validate` | `lib/validate.sh` | offline checks on the built artifacts |
 | `make publish` | `lib/publish.sh` | GHCR push, SBOM, checksums, release notes |
@@ -30,8 +30,11 @@ Procedures, prerequisites and troubleshooting are in the [build runbook](runbook
 
 - `lib/preflight.sh` is also `build.sh`'s library. `build.sh` sources it, so a preflight check cannot drift
   from the build.
-- Preflight skips everything that needs the kernel tree: patch replay, `olddefconfig`, the compile, the
-  imager. Those only mean something inside the pkgs toolchain.
+- Preflight replays the kernel patches on the files they touch. It fetches those files from
+  `raw.githubusercontent.com` at the resolved fork commit: 19 files and under 1 MB for Talos 1.14.7. A
+  Talos bump whose patches no longer apply then fails on its PR, before auto-merge merges it.
+- Preflight skips everything that needs the whole kernel tree or the toolchain: `olddefconfig`, the compile,
+  the imager. Those only mean something inside the pkgs toolchain.
 - The failure they would catch costs one red `build` workflow. `build.yaml` publishes and releases only after
   a green build, so a bad bump never ships.
 - `.github/workflows/preflight.yaml` runs preflight on every PR. `ci.yaml`'s `main-is-green` job fails a PR
@@ -82,6 +85,8 @@ anchor it edits and fails naming what upstream moved.
 - `lib/patch_gate.sh` dry-runs each patch. It applies what applies, skips only the slugs in
   `kernel/patch-skip.txt`, and fails on anything else. So a pkgs bump that adds a patch this build cannot
   apply stops the build and does not drop the fix.
+- The build runs the gate inside the pkgs toolchain container. Preflight runs the same script on the files
+  the patches touch, so it fails first, on the PR.
 - A slug is the patch filename without its `NNNN-` prefix, because pkgs renumbers its files. A slug that
   matches no patch fails the build before the kernel download.
 - To re-check the skip list after a pkgs bump, see the [build runbook](runbooks/build.md#re-check-the-patch-skip-list).

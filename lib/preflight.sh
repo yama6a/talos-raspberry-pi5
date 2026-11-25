@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # The cheap half of the build: the upstream checkouts still look the way the build expects, the files the
-# build rewrites still have their anchors, and the overlay still builds against this Talos's machinery. No
-# Docker, no kernel source, no compiler.
+# build rewrites still have their anchors, the kernel patches still apply to the files they touch, and the
+# overlay still builds against this Talos's machinery. No Docker, no kernel tarball, no compiler.
 #
 # Doubles as build.sh's library: build.sh sources this file and calls the same functions, so a check here can
 # never drift from what the build actually does. Some functions below are only used by build.sh.
 #
-# Scope is deliberate. Anything needing the kernel tree is left to the real build, because a bad bump costs
-# one red build workflow and nothing else: build.yaml gates publish and release on the build succeeding.
+# Scope is deliberate. Anything needing the whole kernel tree or the toolchain is left to the real build:
+# build.yaml gates publish and release on the build succeeding.
 set -euo pipefail
 
 [[ -n "${_PREFLIGHT_SH:-}" ]] && return 0
@@ -151,6 +151,30 @@ PY
 
 space_list() { printf '%s' "$1" | tr '\n' ' ' | sed 's/ *$//'; }
 
+# Replay the build's patch loop on the only files it touches: about 20 files, under 1 MB, fetched from the rpi
+# fork at KERNEL_COMMIT. So a bump whose patches no longer apply fails on its PR, not on main after the merge.
+# A path the fork lacks is a file a patch creates.
+replay_kernel_patches() {
+  local tree="${BUILD_DIR}/patch-replay" f code p
+  rm -rf "${tree:?}"
+  mkdir -p "$tree"
+  while read -r f; do
+    mkdir -p "$tree/$(dirname "$f")"
+    code="$(curl -sSL --retry 3 -o "$tree/$f" -w '%{http_code}' \
+      "https://raw.githubusercontent.com/raspberrypi/linux/${KERNEL_COMMIT}/${f}")"
+    case "$code" in
+      200) ;;
+      404) rm -f "${tree:?}/${f:?}" ;;
+      *) die "fetching ${f} at raspberrypi/linux ${KERNEL_COMMIT:0:12} returned HTTP ${code}" ;;
+    esac
+  done < <(sed -nE 's#^(---|\+\+\+) [ab]/([^[:space:]]+).*#\2#p' "$CHK/pkgs/kernel/build/patches"/*.patch | sort -u)
+  for p in $(find "$CHK/pkgs/kernel/build/patches" -type f -name '*.patch' | LC_ALL=C sort); do
+    (cd "$tree" && bash "${_PREFLIGHT_DIR}/patch_gate.sh" "$p" "$(space_list "$PKGS_PATCH_SKIP")" \
+      "$(space_list "$LOCAL_PATCH_SLUGS")") \
+      || die "a kernel patch does not apply to raspberrypi/linux ${KERNEL_COMMIT:0:12}, see above"
+  done
+}
+
 # Merge the fragment, reconcile with olddefconfig, then verify every bake-in before compiling, so an unmet
 # dependency fails in seconds rather than after a 40-minute build.
 inject_config_merge() {
@@ -205,8 +229,10 @@ preflight_print_result() {
   echo "   kernel     ${KERNEL_VERSION} (${KERNEL_COMMIT:0:12}, via ${KERNEL_SOURCE})"
   echo "   overlay    ${SBCOVERLAY_VERSION:0:12} builds against machinery ${MACHINERY_VERSION}"
   echo
-  echo "   Not proven, and only a real build can: the pkgs patches still apply to the rpi fork, the config"
-  echo "   fragment survives olddefconfig, the kernel compiles, the imager produces a bootable image."
+  echo "   patches    every kernel patch applies or is skipped, on the files it touches"
+  echo
+  echo "   Not proven, and only a real build can: the config fragment survives olddefconfig, the kernel"
+  echo "   compiles, the imager produces a bootable image."
 }
 
 # ---- main, only when run directly ----
@@ -221,11 +247,9 @@ preflight_main() {
   assert_pkgs_matches_resolver
   assert_patch_skips_exist
 
-  # Deliberately no kernel tarball here. Replaying the patch series and olddefconfig on the host would need a
-  # 250 MB download and a clang that is not the one in the pkgs toolchain image, to pre-empt a failure whose
-  # entire cost is one red build workflow: build.yaml gates publish and release on the build succeeding, so a
-  # bad bump never reaches GHCR or a release. Not worth the machinery. The rewrites below still get checked,
-  # because they are pure file edits and cost nothing.
+  # Deliberately no kernel tarball here. olddefconfig on the host would need a 250 MB download and a clang that
+  # is not the one in the pkgs toolchain image. The rewrites below still get checked, because they are pure
+  # file edits and cost nothing.
   say "checking the rewrites the build makes to upstream files still have their anchors"
   stage_kernel_config
   stage_local_kernel_patches
@@ -233,6 +257,9 @@ preflight_main() {
   inject_config_merge
   echo "   kernel/build/pkg.yaml took both rewrites"
   dockerfile_frontend_ref > /dev/null && echo "   talos Dockerfile still declares a '# syntax =' frontend"
+
+  say "replaying the kernel patches on the files they touch in raspberrypi/linux ${KERNEL_COMMIT:0:12}"
+  replay_kernel_patches
 
   port_overlay_to_machinery
 
