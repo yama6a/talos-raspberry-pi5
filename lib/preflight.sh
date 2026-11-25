@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # The cheap half of the build: the upstream checkouts still look the way the build expects, the files the
-# build rewrites still have their anchors, and the overlay still builds against this Talos's machinery. No
-# Docker, no kernel source, no compiler.
+# build rewrites still have their anchors, the kernel patches still apply to the files they touch, and the
+# overlay still builds against this Talos's machinery. No Docker, no kernel tarball, no compiler.
 #
 # Doubles as build.sh's library: build.sh sources this file and calls the same functions, so a check here can
 # never drift from what the build actually does. Some functions below are only used by build.sh.
 #
-# Scope is deliberate. Anything needing the kernel tree is left to the real build, because a bad bump costs
-# one red build workflow and nothing else: build.yaml gates publish and release on the build succeeding.
+# Scope is deliberate. Anything needing the whole kernel tree or the toolchain is left to the real build:
+# build.yaml gates publish and release on the build succeeding.
 set -euo pipefail
 
 [[ -n "${_PREFLIGHT_SH:-}" ]] && return 0
@@ -131,41 +131,48 @@ stage_local_kernel_patches() {
 }
 
 # pkgs' kernel patches target vanilla kernel.org; we build raspberrypi/linux, where some are already merged or
-# collide. Gate each on a dry-run: apply what applies, skip only what patch-skip.txt names, fail on anything
-# else, so a pkgs bump that adds a patch we cannot apply stops the build instead of dropping a fix. A patch from
-# kernel/patches is never skipped: it fails the build when it stops applying.
+# collide. Run each through lib/patch_gate.sh, so a pkgs bump that adds a patch we cannot apply stops the build
+# instead of dropping a fix.
 gate_kernel_patches() {
-  python3 - "$CHK/pkgs/kernel/build/pkg.yaml" "$(printf '%s' "$PKGS_PATCH_SKIP" | tr '\n' ' ')" \
-    "$(printf '%s' "$LOCAL_PATCH_SLUGS" | tr '\n' ' ')" << 'PY'
+  cp "${_PREFLIGHT_DIR}/patch_gate.sh" "$CHK/pkgs/kernel/build/patch_gate.sh"
+  python3 - "$CHK/pkgs/kernel/build/pkg.yaml" "$(space_list "$PKGS_PATCH_SKIP")" "$(space_list "$LOCAL_PATCH_SLUGS")" << 'PY'
 import sys
-p,skip,local=sys.argv[1],sys.argv[2].strip(),sys.argv[3].strip()
+p,skip,local=sys.argv[1],sys.argv[2],sys.argv[3]
 s=open(p).read()
 anchor='''          patch -p1 < $patch || (echo "Failed to apply patch $patch" && exit 1)
           echo "Applied patch $patch"
 '''
-block=f'''          slug=$(basename $patch .patch); case "$slug" in [0-9]*-*) slug=${{slug#*-}} ;; esac
-          if patch -p1 -N --dry-run --silent < $patch >/dev/null 2>&1; then
-            patch -p1 -N < $patch
-            echo "Applied patch $slug"
-          elif echo "{local}" | tr ' ' '\\n' | grep -qxF "$slug"; then
-            echo "FAILED: kernel/patches patch does not apply to raspberrypi/linux: $slug"
-            echo "  rebase it onto the kernel commit in .cache/build-inputs.json, or drop it if the rpi tree has it now"
-            echo "  rejects: /src/**/*.rej"
-            exit 1
-          elif echo "{skip}" | tr ' ' '\\n' | grep -qxF "$slug"; then
-            echo "Skipped patch $slug (kernel/patch-skip.txt)"
-          else
-            echo "FAILED: pkgs patch does not apply to raspberrypi/linux: $slug"
-            echo "  pkgs patches target kernel.org, we build the rpi fork, so collisions are expected"
-            echo "  fix already in the rpi tree -> add '$slug' to kernel/patch-skip.txt"
-            echo "  fix genuinely missing       -> rebase the patch onto the rpi tree, or skip it deliberately"
-            echo "  rejects: /src/**/*.rej"
-            exit 1
-          fi
+block=f'''          bash /pkg/patch_gate.sh "$patch" "{skip}" "{local}"
 '''
 assert anchor in s, "kernel/build/pkg.yaml patch loop not found (upstream changed?)"
 open(p,"w").write(s.replace(anchor, block, 1))
 PY
+}
+
+space_list() { printf '%s' "$1" | tr '\n' ' ' | sed 's/ *$//'; }
+
+# Replay the build's patch loop on the only files it touches: about 20 files, under 1 MB, fetched from the rpi
+# fork at KERNEL_COMMIT. So a bump whose patches no longer apply fails on its PR, not on main after the merge.
+# A path the fork lacks is a file a patch creates.
+replay_kernel_patches() {
+  local tree="${BUILD_DIR}/patch-replay" f code p
+  rm -rf "${tree:?}"
+  mkdir -p "$tree"
+  while read -r f; do
+    mkdir -p "$tree/$(dirname "$f")"
+    code="$(curl -sSL --retry 3 -o "$tree/$f" -w '%{http_code}' \
+      "https://raw.githubusercontent.com/raspberrypi/linux/${KERNEL_COMMIT}/${f}")"
+    case "$code" in
+      200) ;;
+      404) rm -f "${tree:?}/${f:?}" ;;
+      *) die "fetching ${f} at raspberrypi/linux ${KERNEL_COMMIT:0:12} returned HTTP ${code}" ;;
+    esac
+  done < <(sed -nE 's#^(---|\+\+\+) [ab]/([^[:space:]]+).*#\2#p' "$CHK/pkgs/kernel/build/patches"/*.patch | sort -u)
+  for p in $(find "$CHK/pkgs/kernel/build/patches" -type f -name '*.patch' | LC_ALL=C sort); do
+    (cd "$tree" && bash "${_PREFLIGHT_DIR}/patch_gate.sh" "$p" "$(space_list "$PKGS_PATCH_SKIP")" \
+      "$(space_list "$LOCAL_PATCH_SLUGS")") \
+      || die "a kernel patch does not apply to raspberrypi/linux ${KERNEL_COMMIT:0:12}, see above"
+  done
 }
 
 # Merge the fragment, reconcile with olddefconfig, then verify every bake-in before compiling, so an unmet
@@ -202,6 +209,29 @@ dockerfile_frontend_ref() {
   printf '%s' "$upstream"
 }
 
+# A modified file makes `git describe --dirty` report `-dirty`, and that string stamps the OS version
+# (--build-arg=TAG), so nodes would report <version>-dirty and a clean talosctl would call it "older than
+# client" (semver ranks a -dirty prerelease below the clean release). assume-unchanged keeps describe clean
+# while the modified content still feeds the build. Idempotent across re-runs.
+keep_describe_clean() {
+  git -C "$CHK/talos" update-index --assume-unchanged "$1"
+}
+
+# github.com/ONSdigital/dp-mocking is gone from GitHub and from proxy.golang.org, so Talos's `go mod download`
+# fails. Talos needs it only through its tools module: dis-vulncheck needs dp-api-clients-go/v2 v2.282.0, which
+# needs dp-mocking. Nothing the build compiles imports it, so a stub that holds only a go.mod completes the
+# module graph. The stub sits under tools/ because the build-go stage copies only go.mod, go.sum, go.work,
+# pkg/machinery's module files and tools/.
+stub_dp_mocking() {
+  local talos="$CHK/talos"
+  grep -qF 'github.com/ONSdigital/dp-api-clients-go/v2 v2.282.0' "$talos/tools/go.mod" \
+    || die "Talos ${TALOS_VERSION} no longer pins dp-api-clients-go/v2 v2.282.0. If 'go mod download' in its checkout passes without the dp-mocking stub, delete stub_dp_mocking"
+  mkdir -p "$talos/tools/dp-mocking-stub"
+  printf 'module github.com/ONSdigital/dp-mocking\n\ngo 1.21\n' > "$talos/tools/dp-mocking-stub/go.mod"
+  printf '\nreplace github.com/ONSdigital/dp-mocking => ./tools/dp-mocking-stub\n' >> "$talos/go.work"
+  keep_describe_clean go.work
+}
+
 # The overlay copies u-boot, config.txt and the dtbs onto the EFI partition. It targets older machinery, and a
 # newer Talos's overlay API added a ctx argument to every method, so it will not compile as-is.
 port_overlay_to_machinery() {
@@ -222,8 +252,10 @@ preflight_print_result() {
   echo "   kernel     ${KERNEL_VERSION} (${KERNEL_COMMIT:0:12}, via ${KERNEL_SOURCE})"
   echo "   overlay    ${SBCOVERLAY_VERSION:0:12} builds against machinery ${MACHINERY_VERSION}"
   echo
-  echo "   Not proven, and only a real build can: the pkgs patches still apply to the rpi fork, the config"
-  echo "   fragment survives olddefconfig, the kernel compiles, the imager produces a bootable image."
+  echo "   patches    every kernel patch applies or is skipped, on the files it touches"
+  echo
+  echo "   Not proven, and only a real build can: the config fragment survives olddefconfig, the kernel"
+  echo "   compiles, the imager produces a bootable image."
 }
 
 # ---- main, only when run directly ----
@@ -238,11 +270,9 @@ preflight_main() {
   assert_pkgs_matches_resolver
   assert_patch_skips_exist
 
-  # Deliberately no kernel tarball here. Replaying the patch series and olddefconfig on the host would need a
-  # 250 MB download and a clang that is not the one in the pkgs toolchain image, to pre-empt a failure whose
-  # entire cost is one red build workflow: build.yaml gates publish and release on the build succeeding, so a
-  # bad bump never reaches GHCR or a release. Not worth the machinery. The rewrites below still get checked,
-  # because they are pure file edits and cost nothing.
+  # Deliberately no kernel tarball here. olddefconfig on the host would need a 250 MB download and a clang that
+  # is not the one in the pkgs toolchain image. The rewrites below still get checked, because they are pure
+  # file edits and cost nothing.
   say "checking the rewrites the build makes to upstream files still have their anchors"
   stage_kernel_config
   stage_local_kernel_patches
@@ -250,6 +280,10 @@ preflight_main() {
   inject_config_merge
   echo "   kernel/build/pkg.yaml took both rewrites"
   dockerfile_frontend_ref > /dev/null && echo "   talos Dockerfile still declares a '# syntax =' frontend"
+  stub_dp_mocking && echo "   talos tools still pins the dp-api-clients-go that needs the dp-mocking stub"
+
+  say "replaying the kernel patches on the files they touch in raspberrypi/linux ${KERNEL_COMMIT:0:12}"
+  replay_kernel_patches
 
   port_overlay_to_machinery
 

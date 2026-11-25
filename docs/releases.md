@@ -43,8 +43,8 @@ Each build pushes three OCI tags and one GitHub release. The GitHub release uses
 - Every run compares its fingerprint with `build-inputs.json` on the newest release for that Talos version.
   Equal means nothing reaching the image changed, and the run stops in under a minute.
 - The fingerprint covers the resolved upstream refs and the recipe files: `lib/build.sh`, `lib/preflight.sh`,
-  `build/Makefile.talos`, `kernel/pi5-rpi.fragment` and `kernel/patch-skip.txt`. So an edit to any of those,
-  comments included, cuts a new revision. An edit to the fragment or the skip list also misses the kernel
+  `lib/patch_gate.sh`, `build/Makefile.talos`, `kernel/pi5-rpi.fragment` and `kernel/patch-skip.txt`. So an
+  edit to any of those, comments included, cuts a new revision. An edit to the fragment or the skip list also misses the kernel
   cache and costs a full kernel compile.
 
 ## Release contents

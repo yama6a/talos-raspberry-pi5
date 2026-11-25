@@ -27,7 +27,7 @@ The checklist for a Talos minor or major is in the [upgrade runbook](runbooks/up
 | pkgs checkout matches Talos, skip list names real patches | yes | | |
 | `pkg.yaml` and Dockerfile rewrites still find their anchors | yes | | |
 | overlay compiles against the new machinery | yes | | |
-| pkgs patches apply to the fork | | yes | |
+| pkgs and local patches apply to the fork, on the files they touch | yes | | |
 | fragment survives `olddefconfig`, kernel compiles | | yes | |
 | imager produces an image, UKI label matches, extensions baked | | yes | |
 | the board boots, `end0` comes up, NVMe is the root | | | yes |

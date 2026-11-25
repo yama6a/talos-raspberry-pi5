@@ -38,7 +38,8 @@ hit it takes about 8.
 
 ## Re-check the patch skip list
 
-Run this after a pkgs bump, against the cached kernel source.
+Preflight replays the patches on every PR. Run this to read a preflight failure in detail, against the cached
+kernel source of a build.
 
 1. Dry-run every pkgs patch:
 
