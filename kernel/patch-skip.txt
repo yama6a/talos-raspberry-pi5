@@ -6,15 +6,20 @@
 # applied, only the slugs below are skipped, and anything else fails the build. A slug here that matches no
 # patch also fails the build, before the kernel download rather than during it.
 #
-# Both entries below come from the Pi 5 macb TX-stall series (raspberrypi/linux PR #7340). See docs/build.md
-# for how to re-check them after a pkgs bump; a conflict is not automatically a skip.
+# The three entries below come from the Pi 5 macb TX-stall series (raspberrypi/linux PR #7340). See
+# docs/build.md for how to re-check them after a pkgs bump; a conflict is not automatically a skip.
 
 # Already in the raspberrypi tree, which assigns MACB_CAPS_PCIE_POSTED_WRITES a different capability bit.
 net-macb-flush-PCIe-posted-write-after-TSTART-doorbe
 
-# Not in the raspberrypi tree. The fork recovers a lost TX-complete interrupt with a tx_pending breadcrumb in
-# the status-register read path instead of pkgs' per-queue delayed_work; we take the fork's version rather
-# than stacking both. It conflicts only on context, an unrelated `bool tx_pending;` mid-hunk.
+# In the raspberrypi tree since 8fafbac7e4c8 (linux 6.18.65, Talos 1.14.7), as an IMR read before both the TX
+# and the RX ring re-check in the NAPI poll. pkgs' version adds the same read with a different comment, so its
+# only hunk fails on context.
+net-macb-insert-PCIe-read-barrier-before-TX-completi
+
+# Not in the raspberrypi tree. The fork recovers a lost TX-complete interrupt its own way instead of pkgs'
+# per-queue delayed_work: every TX poll restarts the transmitter (c95b534d1260), and ndo_tx_timeout schedules
+# the TX poll (6ea66a528580). We take the fork's version rather than stacking both.
 net-macb-add-TX-stall-watchdog-to-recover-from-lost-
 
 # The macb EEE series pkgs added for Talos 1.14 (mainline 7.1, backported onto 6.18). The raspberrypi tree

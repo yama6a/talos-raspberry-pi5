@@ -59,11 +59,14 @@ is in [upgrade.md](../upgrade.md). Below, `$OLD` and `$NEW` are the pkgs refs of
 
    ```
    grep -n 'MACB_CAPS_PCIE_POSTED_WRITES\|MACB_CAPS_EEE' drivers/net/ethernet/cadence/macb.h
-   grep -n 'tx_pending' drivers/net/ethernet/cadence/macb_main.c
+   grep -n 'queue_readl(queue, IMR)\|macb_tx_restart(queue);\|napi_schedule(&queue->napi_tx)' \
+     drivers/net/ethernet/cadence/macb_main.c
    ```
 
-   Expected: both capability bits defined, and `tx_pending` used in the TSR read path. If the fork dropped
-   its own TX-stall recovery, pkgs' watchdog patch is needed again and its skip entry is wrong.
+   Expected: both capability bits defined. In `macb_main.c`, an IMR read before each ring re-check in the
+   NAPI poll, `macb_tx_restart()` called from `macb_tx_poll()`, and `macb_tx_timeout()` scheduling the TX
+   poll. If the fork dropped its own TX-stall recovery, pkgs' watchdog patch is needed again and its skip
+   entry is wrong.
 
 5. Diff the stock config for every symbol the fragment asserts:
 
