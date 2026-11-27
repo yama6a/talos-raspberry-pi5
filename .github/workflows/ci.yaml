@@ -26,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: yama6a/gha/.github/actions/yaml-checks@v2
+      - uses: yama6a/gha/.github/actions/validate-renovate-config@v2
 
   main-is-green:
     name: main-is-green
@@ -52,13 +53,3 @@ jobs:
             none) echo "no completed build workflow on main yet" ;;
             *) echo "main's last build workflow: ${conclusion}" ;;
           esac
-
-  renovate-config:
-    name: renovate-config
-    runs-on: ubuntu-26.04-arm
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # A broken config silently stops every dependency update.
-      - uses: yama6a/gha/.github/actions/validate-renovate-config@v2
-        with:
-          config-file: renovate.json5
